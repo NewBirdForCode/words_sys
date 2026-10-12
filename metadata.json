@@ -1,0 +1,9 @@
+{
+  "name": "每日30词自主批改与错题循环系统",
+  "description": "基于自主测评与动态错题淘汰循环的每日30词抗遗忘学习系统，支持全词平铺网格、多轮错题复习闭环、三次抗遗忘及顽固生词追踪。",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

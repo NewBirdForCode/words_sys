@@ -18,3 +18,24 @@ View your app in AI Studio: https://ai.studio/apps/e2c08356-e880-4fbc-ae68-26fb6
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+## Windows Desktop Packaging
+
+This project includes an Electron desktop wrapper. The desktop app starts the local API server automatically and loads the packaged React interface.
+
+Install dependencies with npm, then build the Windows x64 portable executable:
+
+```bash
+npm install
+npm run desktop:pack:portable
+```
+
+The output is written to `release/words_sys-0.0.0-win-x64.exe`.
+
+To build the Windows NSIS installer instead:
+
+```bash
+npm run desktop:pack
+```
+
+The NSIS target is best built on Windows or on Linux with Wine installed. The portable target can be built without an installer environment.

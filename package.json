@@ -7,8 +7,11 @@
     "dev": "tsx server.ts",
     "start": "node server.ts",
     "build": "vite build",
+    "build:desktop": "npm run build && node scripts/build-electron.mjs",
+    "desktop:pack": "npm run build:desktop && electron-builder --win --x64",
+    "desktop:pack:portable": "npm run build:desktop && electron-builder --win portable --x64",
     "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
+    "clean": "rm -rf dist dist-electron release server.js",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
@@ -29,10 +32,47 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.21",
+    "electron": "^38.2.2",
+    "electron-builder": "^26.0.12",
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2",
     "@types/express": "^4.17.21"
+  },
+  "main": "electron/main.cjs",
+  "build": {
+    "appId": "com.newbird.words_sys",
+    "productName": "每日30词",
+    "artifactName": "words_sys-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "每日30词"
+    }
   }
 }

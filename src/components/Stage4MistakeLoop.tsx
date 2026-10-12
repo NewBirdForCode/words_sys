@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Volume2,
   Check,
@@ -49,6 +49,7 @@ export const Stage4MistakeLoop: React.FC<Stage4MistakeLoopProps> = ({
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [isFinished, setIsFinished] = useState(false);
   const [enriched, setEnriched] = useState<WordEnrichmentData | null>(null);
+  const speechPromiseRef = useRef<Promise<void> | null>(null);
 
   // 初始化错题池
   useEffect(() => {
@@ -75,6 +76,7 @@ export const Stage4MistakeLoop: React.FC<Stage4MistakeLoopProps> = ({
     setIsMeaningRevealed(false);
     setIsTransitioning(false);
     setEnriched(null);
+    speechPromiseRef.current = null;
 
     if (currentWord) {
       resolveWordEnrichment(currentWord)
@@ -87,11 +89,13 @@ export const Stage4MistakeLoop: React.FC<Stage4MistakeLoopProps> = ({
     }
   }, [currentIndex, roundNumber, currentWord?.id]);
 
-  const playCurrentWord = (wordStr: string) => {
-    speakWord(wordStr, {
+  const playCurrentWord = (wordStr: string): Promise<void> => {
+    const promise = speakWord(wordStr, {
       audioUrl: currentWord?.dictAudioUrl || currentWord?.audioUrl || enriched?.audioUrl || undefined,
       onError: msg => onSpeechError?.(msg),
     });
+    speechPromiseRef.current = promise;
+    return promise;
   };
 
   const handleReveal = () => {
@@ -102,8 +106,13 @@ export const Stage4MistakeLoop: React.FC<Stage4MistakeLoopProps> = ({
   };
 
   // 轮转推进逻辑
-  const processNextStep = (isKnown: boolean) => {
-    if (!currentWordId) return;
+  const processNextStep = async (isKnown: boolean) => {
+    if (!currentWordId || !currentWord) return;
+    setIsTransitioning(true);
+
+    const speech = speechPromiseRef.current || playCurrentWord(currentWord.word);
+    await speech;
+    await new Promise<void>(resolve => setTimeout(resolve, 3000));
 
     let updatedWrongIds = [...stillWrongIdsInCurrentRound];
 
@@ -121,10 +130,7 @@ export const Stage4MistakeLoop: React.FC<Stage4MistakeLoopProps> = ({
 
     // 判断本轮是否还有未答错词
     if (currentIndex < activeQueue.length - 1) {
-      setIsTransitioning(true);
-      setTimeout(() => {
-        setCurrentIndex(prev => prev + 1);
-      }, 150);
+      setCurrentIndex(prev => prev + 1);
     } else {
       // 本轮结束，检查是否还有残留错词
       if (updatedWrongIds.length === 0) {
@@ -143,15 +149,16 @@ export const Stage4MistakeLoop: React.FC<Stage4MistakeLoopProps> = ({
 
   const handleKnownClick = () => {
     if (isTransitioning || !currentWord) return;
-    processNextStep(true);
+    void processNextStep(true);
   };
 
   const handleWrongClick = () => {
     if (isTransitioning || !currentWord) return;
+    setIsTransitioning(true);
     setIsMeaningRevealed(true);
     playCurrentWord(currentWord.word);
     setTimeout(() => {
-      processNextStep(false);
+      void processNextStep(false);
     }, 600);
   };
 

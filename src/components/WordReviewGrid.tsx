@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Volume2,
   Check,
@@ -45,6 +45,7 @@ export const WordReviewGrid: React.FC<WordReviewGridProps> = ({
   const [isMeaningRevealed, setIsMeaningRevealed] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [enriched, setEnriched] = useState<WordEnrichmentData | null>(null);
+  const speechPromiseRef = useRef<Promise<void> | null>(null);
 
   const currentWord = words[currentIndex];
 
@@ -58,6 +59,7 @@ export const WordReviewGrid: React.FC<WordReviewGridProps> = ({
     setIsMeaningRevealed(false);
     setIsTransitioning(false);
     setEnriched(null);
+    speechPromiseRef.current = null;
 
     if (currentWord) {
       resolveWordEnrichment(currentWord)
@@ -70,11 +72,13 @@ export const WordReviewGrid: React.FC<WordReviewGridProps> = ({
     }
   }, [currentIndex, currentWord?.id]);
 
-  const playCurrentWord = (wordStr: string) => {
-    speakWord(wordStr, {
+  const playCurrentWord = (wordStr: string): Promise<void> => {
+    const promise = speakWord(wordStr, {
       audioUrl: currentWord?.dictAudioUrl || currentWord?.audioUrl || enriched?.audioUrl || undefined,
       onError: msg => onSpeechError?.(msg),
     });
+    speechPromiseRef.current = promise;
+    return promise;
   };
 
   const handleReveal = () => {
@@ -84,12 +88,17 @@ export const WordReviewGrid: React.FC<WordReviewGridProps> = ({
     }
   };
 
-  const advanceNext = () => {
+  const advanceNext = async (transitionAlreadyStarted = false) => {
+    if (!currentWord || (!transitionAlreadyStarted && isTransitioning)) return;
+    if (!transitionAlreadyStarted) setIsTransitioning(true);
+
+    // 不使用固定的短延迟猜测音频长度：Windows 音频可能因网络或语音包不同而变长。
+    const speech = speechPromiseRef.current || playCurrentWord(currentWord.word);
+    await speech;
+    await new Promise<void>(resolve => setTimeout(resolve, 3000));
+
     if (currentIndex < words.length - 1) {
-      setIsTransitioning(true);
-      setTimeout(() => {
-        setCurrentIndex(prev => prev + 1);
-      }, 150);
+      setCurrentIndex(prev => prev + 1);
     } else {
       onCompleteStage2?.();
     }
@@ -98,17 +107,16 @@ export const WordReviewGrid: React.FC<WordReviewGridProps> = ({
   const handleKnownClick = () => {
     if (!currentWord || isTransitioning) return;
     onSelectKnown(currentWord.id);
-    advanceNext();
+    void advanceNext();
   };
 
   const handleWrongClick = () => {
     if (!currentWord || isTransitioning) return;
     onSelectWrong(currentWord.id);
     setIsMeaningRevealed(true);
-    playCurrentWord(currentWord.word);
-    setTimeout(() => {
-      advanceNext();
-    }, 600);
+    setIsTransitioning(true);
+    void playCurrentWord(currentWord.word).then(() => new Promise<void>(resolve => setTimeout(resolve, 600)))
+      .then(() => advanceNext(true));
   };
 
   // 空词库状态

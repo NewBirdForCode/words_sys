@@ -62,6 +62,7 @@ export const Stage3Spelling: React.FC<Stage3SpellingProps> = ({
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   const isAdvancingRef = useRef(false);
+  const speechPromiseRef = useRef<Promise<void> | null>(null);
 
   const currentWord = words[currentIndex];
   const targetWord = (currentWord?.word || '').trim();
@@ -90,6 +91,7 @@ export const Stage3Spelling: React.FC<Stage3SpellingProps> = ({
     setRevealedCorrectAnswer(null);
     setEnriched(null);
     isAdvancingRef.current = false;
+    speechPromiseRef.current = null;
 
     resolveWordEnrichment(currentWord)
       .then(res => {
@@ -98,11 +100,13 @@ export const Stage3Spelling: React.FC<Stage3SpellingProps> = ({
       .catch(() => {});
   }, [currentIndex, isCompleted, currentWord?.id]);
 
-  const playPronunciation = (wordStr: string) => {
-    speakWord(wordStr, {
+  const playPronunciation = (wordStr: string): Promise<void> => {
+    const promise = speakWord(wordStr, {
       audioUrl: currentWord?.dictAudioUrl || currentWord?.audioUrl || enriched?.audioUrl || undefined,
       onError: msg => onSpeechError?.(msg),
     });
+    speechPromiseRef.current = promise;
+    return promise;
   };
 
   const formatTime = (sec: number) => {
@@ -188,7 +192,7 @@ export const Stage3Spelling: React.FC<Stage3SpellingProps> = ({
       ]);
 
       setTimeout(() => {
-        advanceToNextWord();
+        void advanceToNextWord();
       }, 700);
     } else {
       setFeedbackStatus('error');
@@ -222,12 +226,16 @@ export const Stage3Spelling: React.FC<Stage3SpellingProps> = ({
       playPronunciation(targetWord);
 
       setTimeout(() => {
-        advanceToNextWord();
+        void advanceToNextWord();
       }, 1800);
     }
   };
 
-  const advanceToNextWord = () => {
+  const advanceToNextWord = async () => {
+    const speech = speechPromiseRef.current || playPronunciation(targetWord);
+    await speech;
+    await new Promise<void>(resolve => setTimeout(resolve, 3000));
+
     if (currentIndex < words.length - 1) {
       setCurrentIndex(prev => prev + 1);
     } else {

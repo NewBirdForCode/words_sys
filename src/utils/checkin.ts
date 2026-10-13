@@ -11,7 +11,9 @@ export interface CheckInRecord {
   photoUrl?: string; // Data URL thumbnail
 }
 
-const STORAGE_KEY_CHECKIN = 'daily30_checkin_records_v1';
+import { userScopedStorageKey } from './userStorage';
+
+const STORAGE_KEY_CHECKIN = userScopedStorageKey('daily30_checkin_records_v1');
 
 export function getAllCheckInRecords(): CheckInRecord[] {
   if (typeof window === 'undefined') return [];

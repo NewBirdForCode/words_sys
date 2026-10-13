@@ -2,11 +2,12 @@ import * as XLSX from 'xlsx';
 import { Wordbook, WordItem } from '../types';
 import { VOCABULARY_BANK } from '../data/vocabulary';
 import { SYSTEM_WORDBOOKS_PRESETS } from '../data/systemWordbooks';
+import { userScopedStorageKey } from './userStorage';
 
 import { TEST_200_WORDBOOK } from '../data/test200Wordbook';
 
-const STORAGE_KEY_WORDBOOKS = 'daily30_wordbooks_v1';
-const STORAGE_KEY_ACTIVE_WORDBOOK_ID = 'daily30_active_wb_id_v1';
+const STORAGE_KEY_WORDBOOKS = userScopedStorageKey('daily30_wordbooks_v1');
+const STORAGE_KEY_ACTIVE_WORDBOOK_ID = userScopedStorageKey('daily30_active_wb_id_v1');
 
 // Seed default wordbook if none exists
 export function getDefaultWordbook(): Wordbook {
@@ -151,14 +152,14 @@ export function saveAllWordbooks(list: Wordbook[]): void {
 
 export function getUserModeForWordbook(wordbookId: string): 'fast_review' | 'focused_quiz' | null {
   if (typeof window === 'undefined') return null;
-  const val = localStorage.getItem(`daily30_user_mode_${wordbookId}`);
+  const val = localStorage.getItem(userScopedStorageKey(`daily30_user_mode_${wordbookId}`));
   if (val === 'fast_review' || val === 'focused_quiz') return val;
   return null;
 }
 
 export function setUserModeForWordbook(wordbookId: string, mode: 'fast_review' | 'focused_quiz'): void {
   if (typeof window === 'undefined') return;
-  localStorage.setItem(`daily30_user_mode_${wordbookId}`, mode);
+  localStorage.setItem(userScopedStorageKey(`daily30_user_mode_${wordbookId}`), mode);
 }
 
 export function getEffectiveModeForWordbook(wordbook: Wordbook): 'fast_review' | 'focused_quiz' {

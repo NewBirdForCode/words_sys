@@ -21,6 +21,7 @@ import { speakWord } from '../utils/speech';
 import { recordMistake, appendReviewLogs, getUserId, getTodayDateString } from '../utils/storage';
 import { updateWordLearningResult } from '../utils/plan';
 import { getWordbookById } from '../utils/wordbook';
+import { userScopedStorageKey } from '../utils/userStorage';
 import {
   printExamPaperDirectly,
   generatePrintPages,
@@ -42,11 +43,11 @@ interface Stage3SpellingProps {
 }
 
 // 缓存持久化 key
-const STORAGE_KEY_STAGE3_VIEW_MODE = 'daily30_stage3_view_mode_v2';
-const STORAGE_KEY_STAGE3_DIRECTION = 'daily30_stage3_direction_v2';
-const STORAGE_KEY_STAGE3_LIST_BATCH_SIZE = 'daily30_stage3_list_batch_v2';
-const STORAGE_KEY_STAGE3_LIST_LETTER_STYLE = 'daily30_stage3_list_letter_style_v2';
-const STORAGE_KEY_STAGE3_AUTO_ADVANCE = 'daily30_stage3_auto_advance_v2';
+const STORAGE_KEY_STAGE3_VIEW_MODE = userScopedStorageKey('daily30_stage3_view_mode_v2');
+const STORAGE_KEY_STAGE3_DIRECTION = userScopedStorageKey('daily30_stage3_direction_v2');
+const STORAGE_KEY_STAGE3_LIST_BATCH_SIZE = userScopedStorageKey('daily30_stage3_list_batch_v2');
+const STORAGE_KEY_STAGE3_LIST_LETTER_STYLE = userScopedStorageKey('daily30_stage3_list_letter_style_v2');
+const STORAGE_KEY_STAGE3_AUTO_ADVANCE = userScopedStorageKey('daily30_stage3_auto_advance_v2');
 
 export const Stage3Spelling: React.FC<Stage3SpellingProps> = ({
   words,

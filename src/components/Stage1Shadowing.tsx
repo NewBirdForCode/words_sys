@@ -22,6 +22,7 @@ import { resolveDseContent } from '../utils/dseContent';
 import { resolveWordAnalysis } from '../data/wordAnalysisBank';
 import { fetchWordImage, getFallbackScene } from '../utils/wordImage';
 import { generateDistractors, DistractorOption } from '../utils/distractorGenerator';
+import { userScopedStorageKey } from '../utils/userStorage';
 
 interface Stage1ShadowingProps {
   words: WordItem[];
@@ -64,14 +65,14 @@ export const Stage1Shadowing: React.FC<Stage1ShadowingProps> = ({
   // 记录两种模式的进度索引
   const [focusedIndex, setFocusedIndex] = useState<number>(() => {
     if (typeof window === 'undefined') return 0;
-    const key = `daily30_stage1_focused_idx_${activeWordbookId || 'default'}`;
+    const key = userScopedStorageKey(`daily30_stage1_focused_idx_${activeWordbookId || 'default'}`);
     const saved = localStorage.getItem(key);
     return saved ? Math.max(0, parseInt(saved, 10) || 0) : 0;
   });
 
   const [fastIndex, setFastIndex] = useState<number>(() => {
     if (typeof window === 'undefined') return 0;
-    const key = `daily30_stage1_fast_idx_${activeWordbookId || 'default'}`;
+    const key = userScopedStorageKey(`daily30_stage1_fast_idx_${activeWordbookId || 'default'}`);
     const saved = localStorage.getItem(key);
     return saved ? Math.max(0, parseInt(saved, 10) || 0) : 0;
   });
@@ -112,9 +113,9 @@ export const Stage1Shadowing: React.FC<Stage1ShadowingProps> = ({
   useEffect(() => {
     if (typeof window === 'undefined' || words.length === 0) return;
     if (isFastReview) {
-      localStorage.setItem(`daily30_stage1_fast_idx_${activeWordbookId || 'default'}`, String(currentIndex));
+      localStorage.setItem(userScopedStorageKey(`daily30_stage1_fast_idx_${activeWordbookId || 'default'}`), String(currentIndex));
     } else {
-      localStorage.setItem(`daily30_stage1_focused_idx_${activeWordbookId || 'default'}`, String(currentIndex));
+      localStorage.setItem(userScopedStorageKey(`daily30_stage1_focused_idx_${activeWordbookId || 'default'}`), String(currentIndex));
     }
   }, [currentIndex, isFastReview, activeWordbookId, words.length]);
 

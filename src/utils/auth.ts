@@ -31,6 +31,25 @@ function normalizeName(name: string): string {
   return name.trim().toLocaleLowerCase();
 }
 
+function migrateLegacyAnonymousData(userId: string): void {
+  if (typeof window === 'undefined') return;
+  const excludedKeys = new Set([USERS_KEY, CURRENT_USER_KEY, 'daily30_user_id_v1']);
+  const keysToMove: string[] = [];
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (key && key.startsWith('daily30_') && !excludedKeys.has(key) && !key.endsWith(`::${userId}`)) {
+      keysToMove.push(key);
+    }
+  }
+  keysToMove.forEach(key => {
+    const value = localStorage.getItem(key);
+    if (value !== null) {
+      localStorage.setItem(`${key}::${userId}`, value);
+      localStorage.removeItem(key);
+    }
+  });
+}
+
 async function hashPassword(password: string): Promise<string> {
   if (typeof window !== 'undefined' && window.crypto?.subtle) {
     const data = new TextEncoder().encode(password);
@@ -54,6 +73,7 @@ export function getCurrentUser(): UserProfile | null {
   const currentId = localStorage.getItem(CURRENT_USER_KEY);
   if (!currentId) return null;
   const user = readUsers().find(item => item.id === currentId);
+  if (user) migrateLegacyAnonymousData(user.id);
   return user ? publicProfile(user) : null;
 }
 
@@ -90,9 +110,11 @@ export async function createUser(input: {
     createdAt: Date.now(),
     passwordHash: await hashPassword(input.password),
   };
+  const isFirstUser = users.length === 0;
   writeUsers([...users, user]);
   localStorage.setItem(CURRENT_USER_KEY, user.id);
   localStorage.setItem('daily30_user_id_v1', user.id);
+  if (isFirstUser) migrateLegacyAnonymousData(user.id);
   return publicProfile(user);
 }
 
@@ -103,6 +125,7 @@ export async function loginUser(name: string, password: string): Promise<UserPro
   }
   localStorage.setItem(CURRENT_USER_KEY, user.id);
   localStorage.setItem('daily30_user_id_v1', user.id);
+  migrateLegacyAnonymousData(user.id);
   return publicProfile(user);
 }
 

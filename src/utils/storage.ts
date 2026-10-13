@@ -1,9 +1,9 @@
 import { ActiveSessionState, ReviewLogRecord, WordStats, ReviewStage, MistakeItem } from '../types';
+import { getActiveUserId, userScopedStorageKey } from './userStorage';
 
-const STORAGE_KEY_LOGS = 'daily30_review_logs_v1';
-const STORAGE_KEY_ACTIVE_SESSION = 'daily30_active_session_v1';
-const STORAGE_KEY_USER_ID = 'daily30_user_id_v1';
-const STORAGE_KEY_MISTAKES = 'daily30_mistake_book_v2';
+const STORAGE_KEY_LOGS = userScopedStorageKey('daily30_review_logs_v1');
+const STORAGE_KEY_ACTIVE_SESSION = userScopedStorageKey('daily30_active_session_v1');
+const STORAGE_KEY_MISTAKES = userScopedStorageKey('daily30_mistake_book_v2');
 
 // 错题本持久化操作 (阶段四：高频错误循环使用，持续追踪不物理删除)
 export function getMistakeBook(): Record<string, MistakeItem> {
@@ -130,13 +130,7 @@ export function resetSessionMistakeFlags(): void {
 
 // Get or generate persistent User ID
 export function getUserId(): string {
-  if (typeof window === 'undefined') return 'user_default';
-  let uid = localStorage.getItem(STORAGE_KEY_USER_ID);
-  if (!uid) {
-    uid = 'user_' + Math.random().toString(36).substring(2, 9);
-    localStorage.setItem(STORAGE_KEY_USER_ID, uid);
-  }
-  return uid;
+  return getActiveUserId();
 }
 
 // Get all append-only review logs (Never overwritten!)

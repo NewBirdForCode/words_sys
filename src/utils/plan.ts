@@ -1,6 +1,7 @@
 import { WordItem, Wordbook } from '../types';
 import { getWordbookById, getDefaultWordbook } from './wordbook';
 import { getTodayDateString } from './storage';
+import { userScopedStorageKey } from './userStorage';
 
 export type IntervalScheduleMode = 'standard' | 'relaxed';
 export type NewWordOrder = 'random' | 'alphabetical';
@@ -108,8 +109,8 @@ export interface WordbookPlanProgress {
   isFullyLearned: boolean;
 }
 
-const STORAGE_KEY_PLAN_SETTINGS = 'daily30_plan_settings_v2';
-const STORAGE_KEY_MEMORY_PROGRESS = 'daily30_memory_progress_v2';
+const STORAGE_KEY_PLAN_SETTINGS = userScopedStorageKey('daily30_plan_settings_v2');
+const STORAGE_KEY_MEMORY_PROGRESS = userScopedStorageKey('daily30_memory_progress_v2');
 const STORAGE_KEY_DAILY_TASK_PREFIX = 'daily30_daily_task_pool_v2_';
 
 // 默认设置
@@ -207,7 +208,7 @@ function getWordKey(wordbookId: string, wordId: string): string {
   return `${wordbookId}_${wordId}`;
 }
 
-const STORAGE_KEY_WORDBOOK_PLANS = 'daily30_wordbook_plan_settings_v1';
+const STORAGE_KEY_WORDBOOK_PLANS = userScopedStorageKey('daily30_wordbook_plan_settings_v1');
 
 /**
  * 获取指定词库的每日新词量设置 (默认30)
@@ -584,7 +585,7 @@ export function getOrGenerateDailyTaskPool(
   mode?: 'fast_review' | 'focused_quiz'
 ): DailyTaskPool {
   const currentMode = mode || 'focused_quiz';
-  const cacheKey = `${STORAGE_KEY_DAILY_TASK_PREFIX}${wordbookId}_${dateStr}_${currentMode}`;
+  const cacheKey = userScopedStorageKey(`${STORAGE_KEY_DAILY_TASK_PREFIX}${wordbookId}_${dateStr}_${currentMode}`);
 
   // 1. 检查今日缓存（当天重新打开继续显示同一批任务）
   if (!forceRefresh && typeof window !== 'undefined') {
@@ -623,7 +624,7 @@ export function getOrGenerateDailyTaskPool(
         // 读取整库断点游标
         let cursor = 0;
         if (typeof window !== 'undefined') {
-          const savedCursor = localStorage.getItem(`daily30_fast_review_cursor_${wordbookId}`);
+          const savedCursor = localStorage.getItem(userScopedStorageKey(`daily30_fast_review_cursor_${wordbookId}`));
           cursor = savedCursor ? parseInt(savedCursor, 10) || 0 : 0;
         }
         cursor = cursor % pool.length;
@@ -789,7 +790,7 @@ export function getOrGenerateDailyTaskPool(
  */
 export function invalidateDailyTaskPool(wordbookId: string, dateStr: string = getTodayDateString()): void {
   if (typeof window === 'undefined') return;
-  const cacheKey = `${STORAGE_KEY_DAILY_TASK_PREFIX}${wordbookId}_${dateStr}`;
+  const cacheKey = userScopedStorageKey(`${STORAGE_KEY_DAILY_TASK_PREFIX}${wordbookId}_${dateStr}`);
   localStorage.removeItem(cacheKey);
 }
 

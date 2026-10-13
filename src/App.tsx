@@ -61,6 +61,7 @@ import { SettingsDrawer } from './components/SettingsDrawer';
 import { PlanCalculatorModal } from './components/PlanCalculatorModal';
 import { AuthScreen } from './components/AuthScreen';
 import { getCurrentUser, logoutUser } from './utils/auth';
+import { userScopedStorageKey } from './utils/userStorage';
 import { getCustomBackgroundFromDB } from './utils/backgroundStorage';
 import {
   DailyTaskPool,
@@ -111,7 +112,7 @@ export default function App() {
   // 翻开卡片自动朗读开关
   const [autoSpeakOnReveal, setAutoSpeakOnReveal] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
-    return localStorage.getItem('daily30_auto_speak_v1') === 'true';
+    return localStorage.getItem(userScopedStorageKey('daily30_auto_speak_v1')) === 'true';
   });
 
   // 打卡海报状态
@@ -148,7 +149,7 @@ export default function App() {
     setActiveWbId(currentWbId);
     const wb = getWordbookById(currentWbId) || getDefaultWordbook();
     // 每天首次进入默认打开精选刷题；用户当天主动切换后遵循设置
-    const todayFirstEntryKey = `daily30_first_entry_default_${learningDate}`;
+    const todayFirstEntryKey = userScopedStorageKey(`daily30_first_entry_default_${learningDate}`);
     let effMode: LearningMode;
     if (typeof window !== 'undefined' && !localStorage.getItem(todayFirstEntryKey)) {
       localStorage.setItem(todayFirstEntryKey, 'true');
@@ -232,7 +233,7 @@ export default function App() {
     setAutoSpeakOnReveal(prev => {
       const next = !prev;
       if (typeof window !== 'undefined') {
-        localStorage.setItem('daily30_auto_speak_v1', String(next));
+        localStorage.setItem(userScopedStorageKey('daily30_auto_speak_v1'), String(next));
       }
       setNotice({
         type: 'info',
@@ -495,7 +496,15 @@ export default function App() {
   };
 
   if (!currentUser) {
-    return <AuthScreen onAuthenticated={setCurrentUser} />;
+    return (
+      <AuthScreen
+        onAuthenticated={user => {
+          setCurrentUser(user);
+          // 模块级存储键需要在当前用户确定后初始化，确保词库和学习状态不会串号。
+          window.location.reload();
+        }}
+      />
+    );
   }
 
   return (
@@ -560,7 +569,7 @@ export default function App() {
             const nextVal = !autoSpeakOnReveal;
             setAutoSpeakOnReveal(nextVal);
             if (typeof window !== 'undefined') {
-              localStorage.setItem('daily30_auto_speak_v1', String(nextVal));
+              localStorage.setItem(userScopedStorageKey('daily30_auto_speak_v1'), String(nextVal));
             }
           }}
           isDark={currentTheme.isDark}

@@ -1,7 +1,8 @@
 import { ThemeConfig, DEFAULT_SUNSHINE_THEME } from '../types/theme';
 import { getCustomBackgroundFromDB } from './backgroundStorage';
+import { userScopedStorageKey } from './userStorage';
 
-const STORAGE_KEY_THEME = 'daily30_theme_settings_v3';
+const STORAGE_KEY_THEME = userScopedStorageKey('daily30_theme_settings_v3');
 
 export function getDefaultTheme(): ThemeConfig {
   return { ...DEFAULT_SUNSHINE_THEME };

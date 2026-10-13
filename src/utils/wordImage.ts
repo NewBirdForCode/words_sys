@@ -8,7 +8,9 @@
  * 5. 支持用户长按从相册上传自定义替换，持久化至 localStorage
  */
 
-const STORAGE_CACHE_KEY = 'daily30_word_image_cache_v2';
+import { userScopedStorageKey } from './userStorage';
+
+const STORAGE_CACHE_KEY = userScopedStorageKey('daily30_word_image_cache_v2');
 
 // 内存中缓存已解析的图片 URL
 let memoryImageCache: Record<string, string> = {};

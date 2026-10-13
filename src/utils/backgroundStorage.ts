@@ -2,10 +2,16 @@
  * IndexedDB storage for custom user wallpaper backgrounds (avoids localStorage quota overflow)
  */
 
+import { userScopedStorageKey } from './userStorage';
+
 const DB_NAME = 'ranci_background_db';
 const DB_VERSION = 1;
 const STORE_NAME = 'backgrounds';
 const KEY_WALLPAPER = 'active_wallpaper';
+
+function getWallpaperKey(): string {
+  return userScopedStorageKey(KEY_WALLPAPER);
+}
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -33,7 +39,7 @@ export async function saveCustomBackgroundToDB(dataUrl: string): Promise<void> {
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
-      const req = store.put(dataUrl, KEY_WALLPAPER);
+      const req = store.put(dataUrl, getWallpaperKey());
       req.onsuccess = () => resolve();
       req.onerror = () => reject(req.error);
     });
@@ -48,7 +54,7 @@ export async function getCustomBackgroundFromDB(): Promise<string | null> {
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readonly');
       const store = tx.objectStore(STORE_NAME);
-      const req = store.get(KEY_WALLPAPER);
+      const req = store.get(getWallpaperKey());
       req.onsuccess = () => resolve((req.result as string) || null);
       req.onerror = () => reject(req.error);
     });
@@ -64,7 +70,7 @@ export async function clearCustomBackgroundFromDB(): Promise<void> {
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
-      const req = store.delete(KEY_WALLPAPER);
+      const req = store.delete(getWallpaperKey());
       req.onsuccess = () => resolve();
       req.onerror = () => reject(req.error);
     });

@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { WordItem, LearningMode, SynonymEntry, CollocationEntry, WordFormEntry } from '../types';
 import { ThemeConfig } from '../types/theme';
-import { speakWord } from '../utils/speech';
+import { speakWord, stopAllSpeech } from '../utils/speech';
 import { recordMistake, removeMistake } from '../utils/storage';
 import { updateWordLearningResult } from '../utils/plan';
 import { BUILTIN_DICTIONARY } from '../data/dictionary';
@@ -196,28 +196,37 @@ export const Stage1Shadowing: React.FC<Stage1ShadowingProps> = ({
     }
   }, [currentIndex, currentWord?.id, words, allWordsMap, targetMeaning]);
 
-  // 模式 B (快速 200 词) 定时器逻辑
+  // 模式 B (快速 200 词) 固定 6 秒节奏：切词后 2 秒发音，第 6 秒切换。
   useEffect(() => {
     if (!isFastReview || isPaused || isCompleted || !currentWord) return;
 
-    const interval = setInterval(() => {
+    const progressInterval = setInterval(() => {
       setElapsedMs(prev => {
         const next = prev + 100;
-        if (next >= FAST_REVIEW_DURATION_MS) {
-          // 6秒已到，流转下一词
-          if (currentIndex < words.length - 1) {
-            setFastIndex(idx => idx + 1);
-          } else {
-            setIsCompleted(true);
-          }
-          return 0;
-        }
-        return next;
+        return Math.min(next, FAST_REVIEW_DURATION_MS);
       });
     }, 100);
 
-    return () => clearInterval(interval);
-  }, [isFastReview, isPaused, isCompleted, currentWord, currentIndex, words.length]);
+    const speechTimer = setTimeout(() => {
+      // 发音固定发生在当前词展示 2 秒后，不等待网络音频结果，保证总周期不漂移。
+      playWord(currentWord.word);
+    }, 2000);
+
+    const advanceTimer = setTimeout(() => {
+      stopAllSpeech();
+      if (currentIndex < words.length - 1) {
+        setFastIndex(index => index + 1);
+      } else {
+        setIsCompleted(true);
+      }
+    }, FAST_REVIEW_DURATION_MS);
+
+    return () => {
+      clearInterval(progressInterval);
+      clearTimeout(speechTimer);
+      clearTimeout(advanceTimer);
+    };
+  }, [isFastReview, isPaused, isCompleted, currentWord, currentIndex, words.length, playWord]);
 
   // 切到下一题
   const handleGoNext = useCallback(() => {

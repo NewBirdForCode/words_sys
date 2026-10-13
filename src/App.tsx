@@ -17,7 +17,8 @@ import {
   WordSelection,
   ReviewLogRecord,
   AppStage,
-  MistakeItem
+  MistakeItem,
+  UserProfile,
 } from './types';
 import {
   getUserId,
@@ -58,6 +59,8 @@ import { MemoryStatsPanel } from './components/MemoryStatsPanel';
 import { CheckInModal } from './components/CheckInModal';
 import { SettingsDrawer } from './components/SettingsDrawer';
 import { PlanCalculatorModal } from './components/PlanCalculatorModal';
+import { AuthScreen } from './components/AuthScreen';
+import { getCurrentUser, logoutUser } from './utils/auth';
 import { getCustomBackgroundFromDB } from './utils/backgroundStorage';
 import {
   DailyTaskPool,
@@ -70,6 +73,7 @@ import {
 import { Wordbook, LearningMode } from './types';
 
 export default function App() {
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => getCurrentUser());
   const [learningDate, setLearningDate] = useState<string>(getTodayDateString());
 
   // 四阶段学习流程 + 统计页：默认每次进入从【阶段一】开始
@@ -490,6 +494,10 @@ export default function App() {
     });
   };
 
+  if (!currentUser) {
+    return <AuthScreen onAuthenticated={setCurrentUser} />;
+  }
+
   return (
     <div
       className={`min-h-screen flex font-sans relative transition-colors duration-200 ${
@@ -543,6 +551,11 @@ export default function App() {
             setIsCheckInModalOpen(true);
           }}
           autoSpeak={autoSpeakOnReveal}
+          currentUser={currentUser}
+          onLogout={() => {
+            logoutUser();
+            setCurrentUser(null);
+          }}
           onToggleAutoSpeak={() => {
             const nextVal = !autoSpeakOnReveal;
             setAutoSpeakOnReveal(nextVal);

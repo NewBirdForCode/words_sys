@@ -69,6 +69,14 @@ export interface DictionaryRawRecord {
 
 export type LearningMode = 'fast_review' | 'focused_quiz';
 
+export interface UserProfile {
+  id: string;
+  name: string;
+  className: string;
+  school: string;
+  createdAt: number;
+}
+
 export interface SynonymEntry {
   word: string;
   meaning?: string;

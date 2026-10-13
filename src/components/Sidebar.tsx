@@ -10,9 +10,11 @@ import {
   Palette,
   Camera,
   Volume2,
-  ChevronDown
+  ChevronDown,
+  LogOut,
+  UserRound
 } from 'lucide-react';
-import { AppStage } from '../types';
+import { AppStage, UserProfile } from '../types';
 
 interface SidebarProps {
   currentStage: AppStage | 'stats';
@@ -23,6 +25,8 @@ interface SidebarProps {
   onOpenCheckIn: () => void;
   autoSpeak: boolean;
   onToggleAutoSpeak: () => void;
+  currentUser: UserProfile;
+  onLogout: () => void;
   isDark?: boolean;
 }
 
@@ -35,6 +39,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenCheckIn,
   autoSpeak,
   onToggleAutoSpeak,
+  currentUser,
+  onLogout,
   isDark = false,
 }) => {
   const [isSettingsExpanded, setIsSettingsExpanded] = useState(false);
@@ -279,9 +285,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
 
-      {/* 底部小版本信息 */}
-      <div className="text-[9px] text-[#A6B8BF] text-center font-mono py-1">
-        v3.0 · 清爽阳光
+      <div className="space-y-2">
+        <div className={`rounded-xl px-2.5 py-2 border ${isDark ? 'bg-neutral-800/70 border-neutral-700' : 'bg-[#F4FAF7] border-[#DDECE3]'}`}>
+          <div className="flex items-center gap-1.5 mb-1">
+            <UserRound className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+            <span className={`text-xs font-bold truncate ${isDark ? 'text-white' : 'text-[#2C3E46]'}`}>{currentUser.name}</span>
+          </div>
+          <p className={`text-[10px] truncate ${isDark ? 'text-neutral-400' : 'text-[#71838A]'}`}>{currentUser.school}</p>
+          <p className={`text-[10px] truncate ${isDark ? 'text-neutral-400' : 'text-[#71838A]'}`}>{currentUser.className}</p>
+          <button
+            type="button"
+            onClick={onLogout}
+            className={`mt-2 w-full py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer ${isDark ? 'text-red-300 bg-red-950/40 hover:bg-red-950/70' : 'text-[#A33D3D] bg-white hover:bg-[#FFF1F1] border border-[#F0D7D7]'}`}
+          >
+            <LogOut className="w-3 h-3" />退出登录
+          </button>
+        </div>
+        <div className="text-[9px] text-[#A6B8BF] text-center font-mono py-1">
+          v3.0 · 清爽阳光
+        </div>
       </div>
     </aside>
   );

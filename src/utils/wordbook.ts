@@ -25,6 +25,7 @@ export function getDefaultWordbook(): Wordbook {
     grade: 'S1-S3',
     volume: 'Book 4A',
     tags: ['阅读', '核心', '基础'],
+    is_system: true,
     words: VOCABULARY_BANK.map(w => ({
       id: w.id,
       word_id: w.id,
@@ -45,25 +46,27 @@ export function getDefaultWordbook(): Wordbook {
 }
 
 export function getAllWordbooks(): Wordbook[] {
-  if (typeof window === 'undefined') return [getDefaultWordbook(), TEST_200_WORDBOOK];
+  if (typeof window === 'undefined') return [getDefaultWordbook()];
   try {
     const raw = localStorage.getItem(STORAGE_KEY_WORDBOOKS);
     if (!raw) {
       const def = getDefaultWordbook();
-      const initial = [def, TEST_200_WORDBOOK];
+      const initial = [def];
       localStorage.setItem(STORAGE_KEY_WORDBOOKS, JSON.stringify(initial));
       return initial;
     }
     let list = JSON.parse(raw) as Wordbook[];
     if (list.length === 0) {
       const def = getDefaultWordbook();
-      const initial = [def, TEST_200_WORDBOOK];
+      const initial = [def];
       localStorage.setItem(STORAGE_KEY_WORDBOOKS, JSON.stringify(initial));
       return initial;
     }
-    // 保证「测试词库 · 200 词」已就绪供一键验证
-    if (!list.some(wb => wb.id === TEST_200_WORDBOOK.id || wb.name === TEST_200_WORDBOOK.name)) {
-      list = [TEST_200_WORDBOOK, ...list];
+    // 历史版本曾把系统测试词库写入个人列表，这里迁移到系统词库标签页。
+    const systemIds = new Set(SYSTEM_WORDBOOKS_PRESETS.map(wb => wb.id));
+    const cleanedList = list.filter(wb => !systemIds.has(wb.id) && wb.id !== TEST_200_WORDBOOK.id);
+    if (cleanedList.length !== list.length) {
+      list = cleanedList.length > 0 ? cleanedList : [getDefaultWordbook()];
       localStorage.setItem(STORAGE_KEY_WORDBOOKS, JSON.stringify(list));
     }
     // 保证字段完整性: 无 category 的旧词库统一归"我的词库"并标"未分类"
@@ -86,7 +89,7 @@ export function getAllWordbooks(): Wordbook[] {
  * 获取所有官方系统预置词汇库
  */
 export function getSystemWordbooks(): Wordbook[] {
-  return SYSTEM_WORDBOOKS_PRESETS;
+  return [getDefaultWordbook(), ...SYSTEM_WORDBOOKS_PRESETS.filter(wb => wb.id !== getDefaultWordbook().id)];
 }
 
 /**

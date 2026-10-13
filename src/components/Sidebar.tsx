@@ -146,7 +146,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             }`}
           >
             <BookOpen className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-            <span className="truncate">词库管理</span>
+            <span className="truncate">词库</span>
           </button>
 
           {/* 统计功能 */}
@@ -217,7 +217,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   }`}
                 >
                   <BookOpen className="w-3 h-3 text-emerald-600" />
-                  <span>词库管理</span>
+                  <span>词库</span>
                 </button>
                 <button
                   type="button"

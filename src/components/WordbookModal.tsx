@@ -71,13 +71,16 @@ const SUB_FILTER_CHIPS: Array<{ key: string; label: string; type: 'grade' | 'tag
   { key: '朗文', label: '朗文', type: 'publisher' },
 ];
 
+const getCustomWordbooks = () =>
+  getAllWordbooks().filter(wb => !wb.is_system && wb.id !== 'wb_default_core');
+
 export const WordbookModal: React.FC<WordbookModalProps> = ({
   isOpen,
   onClose,
   onActiveWordbookChange,
   onStartLearningMode,
 }) => {
-  // 顶部双Tab: 「我的词库」(默认) / 「系统词汇」
+  // 顶部双Tab: 「自定义词库」(默认) / 「系统词库」
   const [activeTab, setActiveTab] = useState<ModalTab>('my_books');
   const [view, setView] = useState<ModalView>('list');
   const [wordbooks, setWordbooks] = useState<Wordbook[]>([]);
@@ -86,7 +89,7 @@ export const WordbookModal: React.FC<WordbookModalProps> = ({
   // 系统词库列表
   const systemWordbooks = useMemo(() => getSystemWordbooks(), []);
 
-  // 系统词汇筛选条件
+  // 系统词库筛选条件
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedSubFilter, setSelectedSubFilter] = useState<string>('all');
 
@@ -115,7 +118,8 @@ export const WordbookModal: React.FC<WordbookModalProps> = ({
   React.useEffect(() => {
     if (isOpen) {
       const all = getAllWordbooks();
-      setWordbooks(all);
+      // 系统词库只在系统词库标签页展示；个人列表只保留用户导入/复制的词库。
+      setWordbooks(all.filter(wb => !wb.is_system && wb.id !== 'wb_default_core'));
       setActiveWbId(getActiveWordbookId());
       setView('list');
       setActiveTab('my_books');
@@ -236,8 +240,7 @@ export const WordbookModal: React.FC<WordbookModalProps> = ({
   const handleConfirmImport = () => {
     if (parsedWords.length === 0) return;
     const created = createWordbook(newBookName, parsedWords);
-    const updatedAll = getAllWordbooks();
-    setWordbooks(updatedAll);
+    setWordbooks(getCustomWordbooks());
     setActiveWbId(created.id);
     onActiveWordbookChange(created.id);
 
@@ -249,13 +252,9 @@ export const WordbookModal: React.FC<WordbookModalProps> = ({
 
   // Delete wordbook
   const handleDeleteWordbook = (id: string, name: string) => {
-    if (wordbooks.length <= 1) {
-      alert('至少需要保留一个词库，无法删除。');
-      return;
-    }
     if (window.confirm(`确定要删除词库「${name}」吗？`)) {
       deleteWordbook(id);
-      const updated = getAllWordbooks();
+      const updated = getCustomWordbooks();
       setWordbooks(updated);
       const currentActive = getActiveWordbookId();
       setActiveWbId(currentActive);
@@ -267,21 +266,20 @@ export const WordbookModal: React.FC<WordbookModalProps> = ({
   const handleSaveRename = (id: string) => {
     if (!editingName.trim()) return;
     updateWordbookName(id, editingName);
-    setWordbooks(getAllWordbooks());
+    setWordbooks(getCustomWordbooks());
     setEditingId(null);
   };
 
-  // 用户点击系统词库的「使用」按钮
-  // 完整复制到个人学习列表并自动激活，不影响系统词库本身
+  // 用户点击系统词库的「加入学习」按钮：复制到个人列表并自动激活。
   const handleUseSystemWordbook = (sysWb: Wordbook) => {
     const userCopy = copySystemWordbookToUser(sysWb);
-    const updated = getAllWordbooks();
+    const updated = getCustomWordbooks();
     setWordbooks(updated);
     setActiveWbId(userCopy.id);
     onActiveWordbookChange(userCopy.id);
     prefetchWordbookEnrichment(userCopy.id);
 
-    setCopiedFeedback(`已将「${sysWb.name}」添加至我的词库并设为当前学习！`);
+    setCopiedFeedback(`已将「${sysWb.name}」加入自定义词库并开始学习！`);
     setTimeout(() => {
       setCopiedFeedback(null);
       setActiveTab('my_books');
@@ -365,7 +363,7 @@ export const WordbookModal: React.FC<WordbookModalProps> = ({
                 {view === 'preview' && '识别预览'}
               </h3>
               <p className="text-xs text-[#666666]">
-                {view === 'list' && (activeTab === 'my_books' ? `我的词库共 ${wordbooks.length} 本 · 点击卡片设为当前学习` : `系统精选考纲语料词库 · 随心添加学习`)}
+                {view === 'list' && (activeTab === 'my_books' ? `自定义词库共 ${wordbooks.length} 本 · 上传后即可加入学习` : `系统词库 · 内置词表只读，点击“加入学习”即可使用`)}
                 {view === 'input' && '支持格式A（单列）、格式B（词+义）、格式C（词+音标+义）'}
                 {view === 'preview' && `词库：${newBookName} · 已识别 ${parsedWords.length} 个单词`}
               </p>
@@ -380,11 +378,11 @@ export const WordbookModal: React.FC<WordbookModalProps> = ({
           </button>
         </div>
 
-        {/* 【一|顶部双Tab(修订)】: 「我的词库」(默认) / 「系统词汇」 */}
+        {/* 顶部双Tab：系统词库 / 自定义词库 */}
         {view === 'list' && (
           <div className="px-4 sm:px-5 pt-3 pb-2 border-b border-[#EAE6DD] bg-[#FAF7F0] flex items-center justify-between">
             <div className="inline-flex p-1 bg-[#EFECE4] rounded-full gap-1">
-              {/* Tab 1: 我的词库 (默认) */}
+              {/* Tab 1: 自定义词库 (默认) */}
               <button
                 type="button"
                 onClick={() => setActiveTab('my_books')}
@@ -394,10 +392,10 @@ export const WordbookModal: React.FC<WordbookModalProps> = ({
                     : 'bg-transparent text-[#446655] hover:text-[#1C3E2A]'
                 }`}
               >
-                我的词库 ({wordbooks.length})
+                自定义词库 ({wordbooks.length})
               </button>
 
-              {/* Tab 2: 系统词汇 */}
+              {/* Tab 2: 系统词库 */}
               <button
                 type="button"
                 onClick={() => setActiveTab('system_books')}
@@ -407,14 +405,14 @@ export const WordbookModal: React.FC<WordbookModalProps> = ({
                     : 'bg-transparent text-[#446655] hover:text-[#1C3E2A]'
                 }`}
               >
-                <span>系统词汇</span>
+                <span>系统词库</span>
                 <span className={`text-[10px] font-normal ${activeTab === 'system_books' ? 'text-white/80' : 'text-[#888888]'}`}>
                   {systemWordbooks.length}
                 </span>
               </button>
             </div>
 
-            {/* 新建/导入按钮 (位于我的词库栏右侧) */}
+            {/* 上传按钮（位于自定义词库栏右侧） */}
             {activeTab === 'my_books' && (
               <button
                 type="button"
@@ -422,7 +420,7 @@ export const WordbookModal: React.FC<WordbookModalProps> = ({
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#2C2C2C] bg-white hover:bg-[#FAF7F0] border border-[#DDD7CC] rounded-xl transition-colors shadow-2xs cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>自建/导入</span>
+                <span>上传单词</span>
               </button>
             )}
           </div>
@@ -431,13 +429,13 @@ export const WordbookModal: React.FC<WordbookModalProps> = ({
         {/* VIEW 1: WORDBOOK LIST */}
         {view === 'list' && (
           <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
-            {/* ---------------- Tab A: 我的词库 ---------------- */}
+            {/* ---------------- Tab A: 自定义词库 ---------------- */}
             {activeTab === 'my_books' && (
               <div className="space-y-3">
                 {wordbooks.length === 0 ? (
                   <div className="py-12 text-center text-[#888888] space-y-3">
                     <BookOpen className="w-10 h-10 mx-auto text-[#CCC]" />
-                    <p className="text-xs">暂无个人词库，可去「系统词汇」选择预置词书，或点击上方「自建/导入」</p>
+                    <p className="text-xs">暂无自定义词库，可去「系统词库」加入内置词书，或点击上方「上传单词」</p>
                   </div>
                 ) : (
                   wordbooks.map(wb => {
@@ -607,10 +605,10 @@ export const WordbookModal: React.FC<WordbookModalProps> = ({
               </div>
             )}
 
-            {/* ---------------- Tab B: 系统词汇 ---------------- */}
+            {/* ---------------- Tab B: 系统词库 ---------------- */}
             {activeTab === 'system_books' && (
               <div className="space-y-5">
-                {/* 【三|系统词汇Tab的分类筛选(修订)】: 两排chips、可横滑 */}
+                {/* 系统词库分类筛选：两排 chips、可横滑 */}
                 <div className="space-y-2.5 pb-2 border-b border-[#EAE6DD]">
                   {/* 第一排 (类别): 全部 / DSE / 雅思 / 四六级 / 校本 / 其他 */}
                   <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
@@ -737,7 +735,7 @@ export const WordbookModal: React.FC<WordbookModalProps> = ({
                                   className="px-3 py-1.5 bg-[#1C3E2A] hover:bg-[#153020] text-white text-xs font-bold rounded-xl transition-all shadow-2xs flex items-center gap-1 cursor-pointer"
                                 >
                                   <Copy className="w-3 h-3" />
-                                  <span>{isAlreadyInUser ? '再次加入' : '使用'}</span>
+                                  <span>{isAlreadyInUser ? '再次加入学习' : '加入学习'}</span>
                                 </button>
                               </div>
                             </div>
@@ -891,7 +889,7 @@ export const WordbookModal: React.FC<WordbookModalProps> = ({
           {view === 'list' && (
             <>
               <span className="text-xs text-[#666666]">
-                {activeTab === 'my_books' ? '已选词库每日自动分配 30 词' : '点"使用"复制到个人学习列表，不影响系统词库'}
+                {activeTab === 'my_books' ? '上传的单词会保存到自定义词库并加入学习' : '系统词库只读，点击“加入学习”后会复制到自定义词库'}
               </span>
               <button
                 type="button"

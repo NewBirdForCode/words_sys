@@ -89,7 +89,7 @@ export function getAllWordbooks(): Wordbook[] {
  * 获取所有官方系统预置词汇库
  */
 export function getSystemWordbooks(): Wordbook[] {
-  return [getDefaultWordbook(), ...SYSTEM_WORDBOOKS_PRESETS.filter(wb => wb.id !== getDefaultWordbook().id)];
+  return SYSTEM_WORDBOOKS_PRESETS;
 }
 
 /**

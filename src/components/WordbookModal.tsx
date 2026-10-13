@@ -143,8 +143,6 @@ export const WordbookModal: React.FC<WordbookModalProps> = ({
     }
   }, [isOpen, onClose]);
 
-  if (!isOpen) return null;
-
   // Handle active wordbook switch
   const handleSelectActive = (wbId: string) => {
     setActiveWordbookId(wbId);
@@ -330,6 +328,8 @@ export const WordbookModal: React.FC<WordbookModalProps> = ({
     });
     return groups;
   }, [filteredSystemWordbooks]);
+
+  if (!isOpen) return null;
 
   return (
     <div

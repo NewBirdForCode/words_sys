@@ -69,6 +69,33 @@ export interface DictionaryRawRecord {
 
 export type LearningMode = 'fast_review' | 'focused_quiz';
 
+export interface SynonymEntry {
+  word: string;
+  meaning?: string;
+}
+
+export interface CollocationEntry {
+  phrase: string;
+  meaning?: string;
+}
+
+export interface WordFormEntry {
+  word: string;
+  pos?: string; // e.g. 'v.', 'n.', 'adj.', 'adv.'
+  meaning?: string;
+}
+
+export interface WordRootsInfo {
+  prefix?: string;
+  prefixMeaning?: string;
+  root: string;
+  rootMeaning?: string;
+  suffix?: string;
+  suffixMeaning?: string;
+  chainMeaning?: string;
+  rawText?: string;
+}
+
 export interface WordItem {
   id: string;
   word_id?: string; // 唯一单词 ID
@@ -79,23 +106,27 @@ export interface WordItem {
   translation?: string; // Compatible alias
   chineseMeaning?: string; // Compatible alias
   partOfSpeech?: string;
+  example?: string; // 课本原句 (精选模式)
   exampleEn?: string;
   exampleCn?: string;
   exampleSentence?: string;
   audioUrl?: string | null;
   dictAudioUrl?: string | null; // Free Dictionary API 原生有效音频
-  source?: string;
+  source?: string; // 课本原句出处 (如 Oxford English for HKDSE)
   category?: string;
   wordbook_id?: string;
   
-  // DSE 课本原句与同义词体系 (Section IV)
+  // DSE 课本原句与同义词体系
   textbook_sentence?: string; // 核实后的课本原句
   sentence_source_type?: 'textbook' | 'generated'; // textbook 或 generated
   source_book?: string; // 来源书册 (如《Oxford English for HKDSE》)
   source_unit?: string; // 来源单元 (如 Book 4B Unit 2)
   source_page?: string | number | null; // 来源页码
   source_reference?: string; // 内部来源编号或出处记录
-  synonyms?: string[]; // 经过核实的同义词数组
+  synonyms?: Array<string | SynonymEntry>; // 经过核实的同义词数组 (支持词或词+释义)
+  collocations?: Array<string | CollocationEntry>; // 常见搭配短语 (支持搭配或搭配+释义)
+  forms?: Array<string | WordFormEntry>; // 单词变形 (带词性标注及可选释义)
+  roots?: string | WordRootsInfo; // 词根词缀构词拆解 (前缀|含义|+词根|含义|+后缀|含义|→串联释义)
   synonym_source?: string; // 同义词来源或审核记录
   sentence_status?: 'verified' | 'generated' | 'missing'; // 原句状态
   content_version?: string; // 素材版本
@@ -103,7 +134,8 @@ export interface WordItem {
 
   // 扩展生活场景备用
   scenarios?: ScenarioExample[];
-  collocations?: string[];
+  scenario?: string; // 场景标签 (如 运动、校园、生活、职场)
+  imageUrl?: string; // 词库配图
   contextMeaning?: string;
   usageTip?: string;
   verificationStatus?: VerificationStatus;
@@ -146,8 +178,12 @@ export type AppStage =
 
 export interface MistakeItem {
   wordId: string;
-  errorCount: number;
-  lastWrongAt: number;
+  errorCount: number; // 历史累计错误次数 (持续追踪，不删除)
+  consecutiveCorrect?: number; // 连续掌握次数 (连续答对后递增)
+  lastWrongAt: number; // 最近一次答错时间戳
+  lastReviewedAt?: number; // 最近一次复习时间戳
+  resolvedAt?: number | null; // 当日攻克时间戳
+  isResolvedInCurrentSession?: boolean; // 当日轮次是否已攻克
 }
 
 export type ReviewStage =

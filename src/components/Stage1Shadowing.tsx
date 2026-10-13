@@ -1,23 +1,27 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   Volume2,
-  Camera,
   Check,
-  ArrowLeft
+  RotateCcw,
+  ArrowRight,
+  ArrowLeft,
+  X,
+  Play,
+  Pause,
+  Sparkles,
+  Flame,
+  HelpCircle
 } from 'lucide-react';
-import { WordItem, LearningMode } from '../types';
+import { WordItem, LearningMode, SynonymEntry, CollocationEntry, WordFormEntry } from '../types';
 import { ThemeConfig } from '../types/theme';
-import { getDefaultTheme } from '../utils/theme';
-import { speakWord, speakSentence, stopAllSpeech } from '../utils/speech';
+import { speakWord } from '../utils/speech';
+import { recordMistake, removeMistake } from '../utils/storage';
+import { updateWordLearningResult } from '../utils/plan';
 import { BUILTIN_DICTIONARY } from '../data/dictionary';
-import { VOCABULARY_BANK } from '../data/vocabulary';
-import {
-  fetchWordImage,
-  saveWordImage,
-  getFallbackScene,
-  FallbackScene
-} from '../utils/wordImage';
-import { resolveDseContent, ResolvedDseContent } from '../utils/dseContent';
+import { resolveDseContent } from '../utils/dseContent';
+import { resolveWordAnalysis } from '../data/wordAnalysisBank';
+import { fetchWordImage, getFallbackScene } from '../utils/wordImage';
+import { generateDistractors, DistractorOption } from '../utils/distractorGenerator';
 
 interface Stage1ShadowingProps {
   words: WordItem[];
@@ -33,34 +37,31 @@ interface Stage1ShadowingProps {
   currentTheme?: ThemeConfig;
 }
 
-interface ChoiceOption {
-  id: string;
-  word: string;
-  meaning: string;
-  isCorrect: boolean;
-}
+const FAST_REVIEW_DURATION_MS = 6000; // 快速模式6秒过词
 
 /**
- * 精选刷词（阶段一）
- * 定位: 刷词，不是刷题。无得分、无对错弹窗、无计时、无错题本。
- *
- * 模式说明：
- * - 「今日精选30词」= 默认模式，阶段一主体，看图 → 读高亮原句 → 选中文释义 → 下一个
- * - 「快速刷200词」= 快速回顾模式，看图 → 读高亮原句 → 下一个 (无选项)
- * - 两个模式各自记录断点位置，切换时不丢失进度
+ * 【阶段一 · 精选刷词（今日 30 词）→ 重构为「左图右词 + 中文四选一」】
+ * - 左栏：配图区 (250×250px)，优先词库图，无图时展示语义场景卡 + 场景标签
+ * - 右栏：单词 (38px 衬线加粗) + 🔊 + 音标词性 + 例句高亮目标词变形 + 释义与标签
+ * - 选项：2×2 高质量中文干扰项，点击立即判定
+ * - 答对：0.6s 自动进入下一词，连击 +1
+ * - 答错：抖动标红，展开四段式解析卡 (同义词/词组搭配/单词变形/错词循环提醒)，点击继续切词
+ * - 快速 200 模式完全保留
  */
 export const Stage1Shadowing: React.FC<Stage1ShadowingProps> = ({
   words,
+  allWordsMap = {},
   activeWordbookId,
   learningMode = 'focused_quiz',
   onModeChange,
   onFinishStage1,
   onBack,
+  onProceedToStage4,
   onSpeechError,
 }) => {
   const isFastReview = learningMode === 'fast_review';
 
-  // 两个模式各自记录断点位置，本地持久化
+  // 记录两种模式的进度索引
   const [focusedIndex, setFocusedIndex] = useState<number>(() => {
     if (typeof window === 'undefined') return 0;
     const key = `daily30_stage1_focused_idx_${activeWordbookId || 'default'}`;
@@ -75,339 +76,302 @@ export const Stage1Shadowing: React.FC<Stage1ShadowingProps> = ({
     return saved ? Math.max(0, parseInt(saved, 10) || 0) : 0;
   });
 
-  // 当前模式对应的词序索引 (安全越界保护)
   const currentIndex = useMemo(() => {
     if (words.length === 0) return 0;
     const target = isFastReview ? fastIndex : focusedIndex;
     return Math.min(Math.max(0, target), words.length - 1);
   }, [isFastReview, fastIndex, focusedIndex, words.length]);
 
-  // 四选一选择态 (选中态: 墨绿描边，不做即时对错反馈，不弹窗)
+  const currentWord = words[currentIndex];
+
+  // 模式 A 答题状态
+  const [options, setOptions] = useState<DistractorOption[]>([]);
   const [selectedOptionId, setSelectedOptionId] = useState<string | null>(null);
+  const [isAnswered, setIsAnswered] = useState<boolean>(false);
+  const [isWrongPick, setIsWrongPick] = useState<boolean>(false);
+  const [consecutiveStreak, setConsecutiveStreak] = useState<number>(0);
+  const [wordConsecutiveCorrect, setWordConsecutiveCorrect] = useState<Record<string, number>>({});
 
-  // 图片加载与缓存
-  const [currentImageUrl, setCurrentImageUrl] = useState<string | null>(null);
-  const [isImageLoading, setIsImageLoading] = useState(true);
-  const [imageLoadError, setImageLoadError] = useState(false);
-  const [fallbackScene, setFallbackScene] = useState<FallbackScene | null>(null);
+  // 图片加载状态
+  const [fetchedImageUrl, setFetchedImageUrl] = useState<string | null>(null);
 
-  // 完成状态
-  const [isCompleted, setIsCompleted] = useState(false);
+  // 模式 B 6 秒节奏状态
+  const [elapsedMs, setElapsedMs] = useState<number>(0);
+  const [isPaused, setIsPaused] = useState<boolean>(false);
 
-  // Refs
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // 整体完成状态
+  const [isCompleted, setIsCompleted] = useState<boolean>(false);
+
+  const autoAdvanceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const onSpeechErrorRef = useRef(onSpeechError);
-
   useEffect(() => {
     onSpeechErrorRef.current = onSpeechError;
   }, [onSpeechError]);
 
-  const currentWord = words[currentIndex];
+  // 同步本地存储进度
+  useEffect(() => {
+    if (typeof window === 'undefined' || words.length === 0) return;
+    if (isFastReview) {
+      localStorage.setItem(`daily30_stage1_fast_idx_${activeWordbookId || 'default'}`, String(currentIndex));
+    } else {
+      localStorage.setItem(`daily30_stage1_focused_idx_${activeWordbookId || 'default'}`, String(currentIndex));
+    }
+  }, [currentIndex, isFastReview, activeWordbookId, words.length]);
 
-  // 规范化目标中文释义
+  // 播放发音
+  const playWord = useCallback((wordStr: string) => {
+    speakWord(wordStr, {
+      audioUrl: currentWord?.dictAudioUrl || currentWord?.audioUrl || undefined,
+      onError: msg => onSpeechErrorRef.current?.(msg),
+    });
+  }, [currentWord]);
+
+  // 获取课本原句与解析数据
   const targetMeaning = useMemo(() => {
     if (!currentWord) return '';
     return (
       currentWord.meaning ||
       currentWord.translation ||
-      currentWord.chineseMeaning ||
       BUILTIN_DICTIONARY[currentWord.word.toLowerCase()]?.meaning ||
-      ''
-    ).trim();
+      '暂无中文释义'
+    );
   }, [currentWord]);
 
-  // 音标
-  const phonetic = useMemo(() => {
-    if (!currentWord) return '';
-    return (
-      currentWord.phonetic ||
-      BUILTIN_DICTIONARY[currentWord.word.toLowerCase()]?.phonetic ||
-      ''
-    ).trim();
-  }, [currentWord]);
-
-  // DSE 课本原句与出处解析
-  const resolvedDse: ResolvedDseContent = useMemo(() => {
+  const resolvedDse = useMemo(() => {
+    if (!currentWord) return { sentence: '', sourceBook: '', sourceUnit: '', sourceText: '' };
     return resolveDseContent(currentWord);
   }, [currentWord]);
 
-  // 备选干扰词池
-  const candidatePool = useMemo(() => {
-    const list: WordItem[] = [...words];
-    if (list.length < 15) {
-      VOCABULARY_BANK.forEach(v => {
-        if (!list.some(item => item.id === v.id || item.word === v.word)) {
-          list.push(v);
-        }
-      });
-    }
-    return list;
-  }, [words]);
+  const phonetic = useMemo(() => {
+    if (!currentWord) return '';
+    return currentWord.phonetic || BUILTIN_DICTIONARY[currentWord.word.toLowerCase()]?.phonetic || '';
+  }, [currentWord]);
 
-  /**
-   * 精选刷题模式：智能生成 4 个中文释义卡片
-   * 优先选词性相同、释义字数相近的同词库干扰项
-   */
-  const currentOptions = useMemo((): ChoiceOption[] => {
-    if (!currentWord) return [];
+  const analysis = useMemo(() => {
+    if (!currentWord) return { synonyms: [], collocations: [], forms: [] };
+    return resolveWordAnalysis(currentWord);
+  }, [currentWord]);
 
-    const correctMeaning = targetMeaning || '核心考点释义';
-    const currentPos = (
-      currentWord.partOfSpeech ||
-      BUILTIN_DICTIONARY[currentWord.word.toLowerCase()]?.partOfSpeech ||
-      ''
-    ).trim().toLowerCase();
+  // 场景与词性标签
+  const partOfSpeechDisplay = useMemo(() => {
+    if (!currentWord) return 'n.';
+    const raw = currentWord.partOfSpeech || BUILTIN_DICTIONARY[currentWord.word.toLowerCase()]?.partOfSpeech || 'n.';
+    return raw.trim();
+  }, [currentWord]);
 
-    // 筛选有效候选词
-    const otherCandidates = candidatePool.filter(
-      w =>
-        w.id !== currentWord.id &&
-        w.word.toLowerCase() !== currentWord.word.toLowerCase() &&
-        (w.meaning || w.translation || '').trim().length > 0 &&
-        (w.meaning || w.translation || '').trim() !== correctMeaning
-    );
+  const scenarioTag = useMemo(() => {
+    if (!currentWord) return '核心词汇';
+    if (currentWord.scenario) return currentWord.scenario;
+    if (currentWord.category) return currentWord.category;
+    const fallback = getFallbackScene(currentWord.word, targetMeaning);
+    return fallback.bgDesc || '常用表达';
+  }, [currentWord, targetMeaning]);
 
-    // 智能评分：同词性优先 + 长度贴近
-    const scored = otherCandidates.map(item => {
-      const itemMeaning = (item.meaning || item.translation || '').trim();
-      const itemPos = (
-        item.partOfSpeech ||
-        BUILTIN_DICTIONARY[item.word.toLowerCase()]?.partOfSpeech ||
-        ''
-      ).trim().toLowerCase();
-
-      let score = 0;
-      if (currentPos && itemPos && (currentPos === itemPos || currentPos.includes(itemPos) || itemPos.includes(currentPos))) {
-        score += 15;
-      }
-      const lenDiff = Math.abs(itemMeaning.length - correctMeaning.length);
-      score += Math.max(0, 10 - lenDiff);
-      score += Math.random() * 4;
-
-      return { item, meaning: itemMeaning, score };
-    });
-
-    scored.sort((a, b) => b.score - a.score);
-
-    const seenMeanings = new Set<string>([correctMeaning]);
-    const distractors: ChoiceOption[] = [];
-
-    for (const entry of scored) {
-      const m = entry.meaning.trim();
-      if (m && !seenMeanings.has(m)) {
-        seenMeanings.add(m);
-        distractors.push({
-          id: `opt_${entry.item.id}_${Math.random().toString(36).substring(2, 6)}`,
-          word: entry.item.word,
-          meaning: m,
-          isCorrect: false,
-        });
-        if (distractors.length >= 3) break;
-      }
-    }
-
-    // 兜底干扰项 (确保绝不为空)
-    const fallbackMeanings = [
-      '居民、住户',
-      '借入、借用',
-      '买得起、承担得起',
-      '避免、避开',
-      '参加、出席',
-      '除非、如果不',
-      '虽然、尽管',
-      '负责任的',
-      '机会、良机',
-      '环境、生态',
-      '无所不在的',
-      '务实的',
-      '减轻、缓和',
-      '有弹性的',
-      '倡导、支持',
-    ];
-
-    let fbIdx = 0;
-    while (distractors.length < 3 && fbIdx < fallbackMeanings.length) {
-      const fbM = fallbackMeanings[fbIdx];
-      if (!seenMeanings.has(fbM)) {
-        seenMeanings.add(fbM);
-        distractors.push({
-          id: `opt_fb_${fbIdx}_${Math.random().toString(36).substring(2, 6)}`,
-          word: 'distractor',
-          meaning: fbM,
-          isCorrect: false,
-        });
-      }
-      fbIdx++;
-    }
-
-    const all4: ChoiceOption[] = [
-      {
-        id: `opt_correct_${currentWord.id}`,
-        word: currentWord.word,
-        meaning: correctMeaning,
-        isCorrect: true,
-      },
-      ...distractors.slice(0, 3),
-    ];
-
-    // 洗牌排列四个选项
-    return all4.sort(() => 0.5 - Math.random());
-  }, [currentWord, targetMeaning, candidatePool]);
-
-  // 播放当前单词发音
-  const playWord = useCallback((wordStr: string) => {
-    speakWord(wordStr, {
-      audioUrl: currentWord?.dictAudioUrl || currentWord?.audioUrl || undefined,
-      onError: msg => {
-        onSpeechErrorRef.current?.(msg);
-      },
-    });
-  }, [currentWord?.dictAudioUrl, currentWord?.audioUrl]);
-
-  // 播放例句发音
-  const playSentence = useCallback((sentenceStr?: string) => {
-    const toSpeak = sentenceStr || resolvedDse.sentence;
-    if (!toSpeak) return;
-    speakSentence(toSpeak, {
-      onError: msg => {
-        onSpeechErrorRef.current?.(msg);
-      },
-    });
-  }, [resolvedDse.sentence]);
-
-  // 换词时重置状态并自动拉取图片
+  // 切词时重置状态、生成选项并异步拉取图片
   useEffect(() => {
-    if (!currentWord || isCompleted) return;
+    if (!currentWord) return;
+
+    if (autoAdvanceTimerRef.current) {
+      clearTimeout(autoAdvanceTimerRef.current);
+      autoAdvanceTimerRef.current = null;
+    }
 
     setSelectedOptionId(null);
-    setImageLoadError(false);
-    setIsImageLoading(true);
+    setIsAnswered(false);
+    setIsWrongPick(false);
+    setElapsedMs(0);
 
-    const baseMeaning = targetMeaning;
-    const scene = getFallbackScene(currentWord.word, baseMeaning);
-    setFallbackScene(scene);
+    // 生成高质量 4 选 1 选项
+    const newOptions = generateDistractors(currentWord, targetMeaning, words, allWordsMap);
+    setOptions(newOptions);
 
-    let isCancelled = false;
-    fetchWordImage(currentWord.word)
-      .then(url => {
-        if (!isCancelled) {
-          if (url) {
-            setCurrentImageUrl(url);
-          } else {
-            setCurrentImageUrl(null);
-          }
-          setIsImageLoading(false);
-        }
-      })
-      .catch(() => {
-        if (!isCancelled) {
-          setCurrentImageUrl(null);
-          setIsImageLoading(false);
-        }
+    // 配图解析
+    if (currentWord.imageUrl) {
+      setFetchedImageUrl(currentWord.imageUrl);
+    } else {
+      setFetchedImageUrl(null);
+      fetchWordImage(currentWord.word).then(img => {
+        if (img) setFetchedImageUrl(img);
       });
+    }
+  }, [currentIndex, currentWord?.id, words, allWordsMap, targetMeaning]);
 
-    // 默认短延迟轻量播音
-    const voiceTimer = setTimeout(() => {
-      playWord(currentWord.word);
-    }, 200);
+  // 模式 B (快速 200 词) 定时器逻辑
+  useEffect(() => {
+    if (!isFastReview || isPaused || isCompleted || !currentWord) return;
 
-    return () => {
-      isCancelled = true;
-      clearTimeout(voiceTimer);
-      stopAllSpeech();
-    };
-  }, [currentIndex, isCompleted, currentWord?.id, playWord, targetMeaning]);
+    const interval = setInterval(() => {
+      setElapsedMs(prev => {
+        const next = prev + 100;
+        if (next >= FAST_REVIEW_DURATION_MS) {
+          // 6秒已到，流转下一词
+          if (currentIndex < words.length - 1) {
+            setFastIndex(idx => idx + 1);
+          } else {
+            setIsCompleted(true);
+          }
+          return 0;
+        }
+        return next;
+      });
+    }, 100);
 
-  // 切换到下一个词
-  const goToNextWord = () => {
-    if (currentIndex >= words.length - 1) {
+    return () => clearInterval(interval);
+  }, [isFastReview, isPaused, isCompleted, currentWord, currentIndex, words.length]);
+
+  // 切到下一题
+  const handleGoNext = useCallback(() => {
+    if (autoAdvanceTimerRef.current) {
+      clearTimeout(autoAdvanceTimerRef.current);
+      autoAdvanceTimerRef.current = null;
+    }
+
+    if (currentIndex < words.length - 1) {
+      if (isFastReview) {
+        setFastIndex(prev => prev + 1);
+      } else {
+        setFocusedIndex(prev => prev + 1);
+      }
+    } else {
       setIsCompleted(true);
-      return;
     }
-    const nextIdx = currentIndex + 1;
-    if (isFastReview) {
-      setFastIndex(nextIdx);
-      if (typeof window !== 'undefined') {
-        localStorage.setItem(`daily30_stage1_fast_idx_${activeWordbookId || 'default'}`, String(nextIdx));
+  }, [currentIndex, words.length, isFastReview]);
+
+  // 切到上一题
+  const handleGoPrev = useCallback(() => {
+    if (autoAdvanceTimerRef.current) {
+      clearTimeout(autoAdvanceTimerRef.current);
+      autoAdvanceTimerRef.current = null;
+    }
+
+    if (currentIndex > 0) {
+      if (isFastReview) {
+        setFastIndex(prev => prev - 1);
+      } else {
+        setFocusedIndex(prev => prev - 1);
       }
+    }
+  }, [currentIndex, isFastReview]);
+
+  // 用户点击选项
+  const handleSelectOption = useCallback((option: DistractorOption) => {
+    if (isAnswered || !currentWord) return;
+
+    setSelectedOptionId(option.id);
+    setIsAnswered(true);
+
+    if (option.isCorrect) {
+      // 答对！
+      setIsWrongPick(false);
+      setConsecutiveStreak(s => s + 1);
+
+      // 跟踪单词连续答对次数
+      const currentWordCorrectCount = (wordConsecutiveCorrect[currentWord.id] || 0) + 1;
+      setWordConsecutiveCorrect(prev => ({
+        ...prev,
+        [currentWord.id]: currentWordCorrectCount,
+      }));
+
+      // 连续答对 2 次标记为已掌握
+      if (currentWordCorrectCount >= 2 && activeWordbookId) {
+        updateWordLearningResult(activeWordbookId, currentWord.id, true);
+        removeMistake(currentWord.id);
+      }
+
+      // 0.6 秒后自动进入下一词
+      autoAdvanceTimerRef.current = setTimeout(() => {
+        handleGoNext();
+      }, 600);
     } else {
-      setFocusedIndex(nextIdx);
-      if (typeof window !== 'undefined') {
-        localStorage.setItem(`daily30_stage1_focused_idx_${activeWordbookId || 'default'}`, String(nextIdx));
-      }
+      // 答错！
+      setIsWrongPick(true);
+      setConsecutiveStreak(0);
+      setWordConsecutiveCorrect(prev => ({
+        ...prev,
+        [currentWord.id]: 0,
+      }));
+
+      // 错词立即加入错误循环 (阶段四消消乐)
+      recordMistake(currentWord.id);
+      // 自动播放一遍正确发音
+      playWord(currentWord.word);
     }
-    setSelectedOptionId(null);
-  };
+  }, [isAnswered, currentWord, wordConsecutiveCorrect, activeWordbookId, handleGoNext, playWord]);
 
-  // 切换到上一个词
-  const goToPrevWord = () => {
-    if (currentIndex <= 0) return;
-    const prevIdx = currentIndex - 1;
-    if (isFastReview) {
-      setFastIndex(prevIdx);
-      if (typeof window !== 'undefined') {
-        localStorage.setItem(`daily30_stage1_fast_idx_${activeWordbookId || 'default'}`, String(prevIdx));
-      }
-    } else {
-      setFocusedIndex(prevIdx);
-      if (typeof window !== 'undefined') {
-        localStorage.setItem(`daily30_stage1_focused_idx_${activeWordbookId || 'default'}`, String(prevIdx));
-      }
+  // 辅操作：「记住了」
+  const handleAuxRemembered = useCallback(() => {
+    if (!currentWord) return;
+    removeMistake(currentWord.id);
+    if (activeWordbookId) {
+      updateWordLearningResult(activeWordbookId, currentWord.id, true);
     }
-    setSelectedOptionId(null);
-  };
+    handleGoNext();
+  }, [currentWord, activeWordbookId, handleGoNext]);
 
-  // 图片上传更换
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !currentWord) return;
+  // 辅操作：「没记住」
+  const handleAuxForgotten = useCallback(() => {
+    if (!currentWord) return;
+    recordMistake(currentWord.id);
+    handleGoNext();
+  }, [currentWord, handleGoNext]);
 
-    const reader = new FileReader();
-    reader.onload = ev => {
-      if (ev.target?.result) {
-        const dataUrl = ev.target.result as string;
-        setCurrentImageUrl(dataUrl);
-        saveWordImage(currentWord.word, dataUrl);
-        setImageLoadError(false);
+  // 键盘快捷键监听
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return;
+
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (currentWord) playWord(currentWord.word);
+      } else if (e.key === 'Enter') {
+        if (isAnswered && isWrongPick) {
+          e.preventDefault();
+          handleGoNext();
+        }
+      } else if (e.code === 'ArrowRight') {
+        e.preventDefault();
+        if (!isAnswered) {
+          handleAuxRemembered();
+        } else if (isWrongPick) {
+          handleGoNext();
+        }
+      } else if (e.code === 'ArrowLeft') {
+        e.preventDefault();
+        if (!isAnswered) {
+          handleAuxForgotten();
+        }
+      } else if (!isAnswered && ['1', '2', '3', '4'].includes(e.key)) {
+        // 数字键快速选择选项
+        const idx = parseInt(e.key, 10) - 1;
+        if (options[idx]) {
+          e.preventDefault();
+          handleSelectOption(options[idx]);
+        }
       }
     };
-    reader.readAsDataURL(file);
-  };
 
-  // 再刷一遍
-  const handleRestart = () => {
-    if (isFastReview) {
-      setFastIndex(0);
-      if (typeof window !== 'undefined') {
-        localStorage.setItem(`daily30_stage1_fast_idx_${activeWordbookId || 'default'}`, '0');
-      }
-    } else {
-      setFocusedIndex(0);
-      if (typeof window !== 'undefined') {
-        localStorage.setItem(`daily30_stage1_focused_idx_${activeWordbookId || 'default'}`, '0');
-      }
-    }
-    setIsCompleted(false);
-    setSelectedOptionId(null);
-  };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [currentWord, playWord, isAnswered, isWrongPick, handleGoNext, handleAuxRemembered, handleAuxForgotten, options, handleSelectOption]);
 
-  /**
-   * 原句中目标单词高亮：橙色文字 + 浅橙底色 (与绿色主题明显区分)
-   */
+  // 高亮例句中目标词及其变形形式（如 sprained、accommodating）
   const renderHighlightedSentence = (sentence: string, targetWord: string) => {
     if (!sentence) return null;
     if (!targetWord) return <span>{sentence}</span>;
 
-    const regex = new RegExp(`(${targetWord}[a-zA-Z]*)`, 'gi');
+    // 匹配词根或前缀变形 (以目标词为主干)
+    const stem = targetWord.length > 4 ? targetWord.slice(0, targetWord.length - 1) : targetWord;
+    const regex = new RegExp(`\\b(${stem}[a-zA-Z]*)\\b`, 'gi');
     const parts = sentence.split(regex);
+
     return (
-      <span className="text-[#2C2C2C] leading-relaxed">
+      <span className="text-[#24343b] leading-relaxed">
         {parts.map((part, index) => {
-          if (part.toLowerCase().startsWith(targetWord.toLowerCase())) {
+          if (part.toLowerCase().startsWith(stem.toLowerCase())) {
             return (
               <span
                 key={index}
-                className="text-[#D9531E] bg-[#FFF0E6] px-1.5 py-0.5 rounded-md font-bold mx-0.5"
+                className="font-bold underline decoration-2 decoration-[#38d39f] underline-offset-4 text-[#168a62] bg-[#e8f8f1]/60 px-1 py-0.5 rounded-sm mx-0.5"
               >
                 {part}
               </span>
@@ -421,329 +385,490 @@ export const Stage1Shadowing: React.FC<Stage1ShadowingProps> = ({
 
   if (!currentWord || words.length === 0) {
     return (
-      <div className="bg-white rounded-3xl border border-[#EAE6DD] p-8 text-center text-[#666666] my-auto">
+      <div className="sunshine-card p-8 text-center text-[#60727B] my-auto max-w-md mx-auto">
         暂无可学习词汇，请返回词库选择或导入单词。
       </div>
     );
   }
 
-  // ---------------- 【全部过完结算界面】 ----------------
+  // 结算界面
   if (isCompleted) {
     return (
-      <div className="bg-white rounded-3xl border border-[#EAE6DD] p-7 sm:p-10 text-center max-w-lg mx-auto shadow-xs animate-fadeIn select-none my-auto">
-        <div className="w-16 h-16 rounded-full bg-[#D7E8DD] text-[#1C3E2A] flex items-center justify-center mx-auto mb-4">
-          <Check className="w-8 h-8" />
+      <div className="sunshine-card p-8 sm:p-10 text-center max-w-lg mx-auto shadow-xs animate-fadeIn select-none my-auto">
+        <div className="w-16 h-16 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-4">
+          <Check className="w-8 h-8 stroke-[3]" />
         </div>
 
-        <h3 className="text-xl sm:text-2xl font-serif font-bold text-[#1C3E2A] mb-2">
-          {isFastReview ? '快速200词已全部刷完 ✓' : '今日30词已全部刷完 ✓'}
+        <h3 className="text-xl sm:text-2xl font-serif-en font-bold text-[#24343b] mb-2">
+          {isFastReview ? '快速刷词已全部完成 ✓' : '今日精选 30 词已刷完 ✓'}
         </h3>
 
-        <p className="text-xs sm:text-sm text-[#666666] mb-6">
-          {isFastReview
-            ? `共快速过完 ${words.length} 词，语境语感混脸熟达成！`
-            : '今日精选任务已全部刷完，学得深、记得牢！'}
+        <p className="text-xs sm:text-sm text-[#7B8F99] mb-6">
+          已完成 {words.length} 词的看图刷词与四选一自测，记不住的词已自动归档进入错题循环。
         </p>
 
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
           <button
             type="button"
-            onClick={handleRestart}
-            className="w-full sm:w-auto px-6 py-2.5 border border-[#DDD7CC] hover:bg-[#FAF7F0] text-[#2C2C2C] font-bold rounded-xl text-sm transition-colors cursor-pointer"
+            onClick={() => {
+              if (isFastReview) setFastIndex(0);
+              else setFocusedIndex(0);
+              setIsCompleted(false);
+            }}
+            className="w-full sm:w-auto px-5 py-2.5 border border-[#CAD8DF] hover:bg-[#FAFDFB] text-[#60727B] font-semibold rounded-xl text-xs sm:text-sm transition-colors cursor-pointer flex items-center justify-center gap-1.5"
           >
-            再刷一遍
+            <RotateCcw className="w-4 h-4" />
+            <span>再刷一遍</span>
           </button>
 
           <button
             type="button"
-            onClick={onBack}
-            className="w-full sm:w-auto px-6 py-2.5 bg-[#1C3E2A] hover:bg-[#142E1F] text-white font-bold rounded-xl text-sm transition-colors cursor-pointer shadow-xs"
+            onClick={onFinishStage1}
+            className="w-full sm:w-auto px-6 py-2.5 bg-acc-grad text-white font-bold rounded-xl text-xs sm:text-sm transition-opacity shadow-xs flex items-center justify-center gap-1.5 cursor-pointer hover:opacity-95"
           >
-            返回
+            <span>进入【阶段二】自测批改</span>
+            <ArrowRight className="w-4 h-4" />
           </button>
-
-          {!isFastReview && onFinishStage1 && (
-            <button
-              type="button"
-              onClick={onFinishStage1}
-              className="w-full sm:w-auto px-5 py-2.5 bg-[#FAF3E8] hover:bg-[#F2E8D8] text-[#7A4B1A] font-bold rounded-xl text-sm transition-colors cursor-pointer border border-[#E8DCC8]"
-            >
-              去阶段二 自测批改 →
-            </button>
-          )}
         </div>
       </div>
     );
   }
 
-  // ---------------- 【卡片学习区】 ----------------
-  const totalCount = words.length;
-  // 剩余词数: 包含当前正在刷的词
-  const remainingCount = Math.max(0, totalCount - currentIndex);
-  const progressPercent = Math.min(100, Math.max(0, ((currentIndex + 1) / totalCount) * 100));
-
-  // 来源展示文本 (优先教材原句标注)
-  const sourceDisplayText = resolvedDse.sourceBook
-    ? resolvedDse.sourceBook
-    : resolvedDse.sourceText.includes('Oxford')
-    ? resolvedDse.sourceText
-    : `Oxford English for HKDSE (Theme: ${resolvedDse.sourceUnit || 'Reading & Writing'})`;
+  const exampleEn = resolvedDse.sentence || currentWord.exampleEn || currentWord.exampleSentence || '';
+  const exampleCn = currentWord.exampleCn || '';
+  const fallbackScene = getFallbackScene(currentWord.word, targetMeaning);
 
   return (
-    <div className="w-full max-w-[480px] mx-auto flex flex-col animate-fadeIn select-none relative pb-6">
-      {/* 隐藏的图片更换 input */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={handleFileChange}
-      />
-
-      {/* 
-        【1|顶部固定栏】
-        左侧 [←返回], 中间标题「精选刷词」, 右侧「剩余 12/30」
-        标题下方一行模式切换 (胶囊按钮, 选中=墨绿实底白字): 🔘 今日精选30词(默认) | 🔘 快速刷200词
+    <div className="w-full max-w-4xl mx-auto flex flex-col justify-between py-2 select-none animate-fadeIn">
+      {/*
+        ---------------- 【顶部一行：保持现状】 ----------------
+        左：今日精选 30 / 快速 200 两个切换按钮
+        中：进度 1 / 65
+        右：← 没记住 / 记住了 → / 发音 快捷入口 (保留为辅操作)
       */}
-      <div className="sticky top-0 z-30 bg-[#FFFDF8]/95 backdrop-blur-md border-b border-[#EAE6DD]/70 pt-1 pb-0 mb-3">
-        <div className="flex items-center justify-between h-10 px-1">
-          {/* 左侧 [←返回] */}
+      <div className="flex items-center justify-between pb-3 border-b border-[#E6EEF1]/80 mb-5 px-1">
+        {/* 左侧：模式切换胶囊 */}
+        <div className="inline-flex bg-white/90 p-0.5 rounded-full border border-[#E6EEF1] shadow-2xs">
           <button
             type="button"
-            onClick={onBack}
-            className="flex items-center gap-1 text-xs text-[#555555] hover:text-[#1C3E2A] font-medium py-1 px-1.5 rounded-lg hover:bg-[#FAF7F0] transition-colors cursor-pointer"
-            title="返回词库管理"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>返回</span>
-          </button>
-
-          {/* 中间标题「精选刷词」 */}
-          <h1 className="font-serif font-bold text-base text-[#2C2C2C] tracking-tight">
-            精选刷词
-          </h1>
-
-          {/* 右侧「剩余 12/30」 */}
-          <span className="font-mono text-xs font-bold text-[#444444] bg-[#FAF7F0] border border-[#EAE6DD] px-2.5 py-0.5 rounded-full shadow-2xs">
-            剩余 {remainingCount}/{totalCount}
-          </span>
-        </div>
-
-        {/* 模式切换 (胶囊按钮, 选中=墨绿实底白字): 🔘 今日精选30词(默认) | 🔘 快速刷200词 */}
-        <div className="flex items-center justify-center pt-1 pb-2">
-          <div className="inline-flex p-1 bg-[#EFECE4] rounded-full gap-1">
-            <button
-              type="button"
-              onClick={() => onModeChange?.('focused_quiz')}
-              className={`px-3.5 py-1 rounded-full text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                !isFastReview
-                  ? 'bg-[#1C3E2A] text-white shadow-2xs'
-                  : 'bg-transparent text-[#555555] hover:text-[#1C3E2A]'
-              }`}
-            >
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  !isFastReview ? 'bg-white' : 'bg-transparent border border-[#888888]'
-                }`}
-              />
-              <span>今日精选30词</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => onModeChange?.('fast_review')}
-              className={`px-3.5 py-1 rounded-full text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                isFastReview
-                  ? 'bg-[#1C3E2A] text-white shadow-2xs'
-                  : 'bg-transparent text-[#555555] hover:text-[#1C3E2A]'
-              }`}
-            >
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  isFastReview ? 'bg-white' : 'bg-transparent border border-[#888888]'
-                }`}
-              />
-              <span>快速刷200词</span>
-            </button>
-          </div>
-        </div>
-
-        {/* 
-          【2|进度条】
-          细条, 仅显示进度, 高度≤4px, 贴在顶部栏下方, 不占大面积
-          快速=蓝色 (bg-blue-600), 精选=绿色 (bg-[#1C3E2A])
-        */}
-        <div className="w-full bg-[#EAE6DD] h-[3px] overflow-hidden">
-          <div
-            className={`h-full transition-all duration-300 ease-out ${
-              isFastReview ? 'bg-blue-600' : 'bg-[#1C3E2A]'
+            onClick={() => onModeChange?.('focused_quiz')}
+            className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
+              !isFastReview
+                ? 'bg-acc-grad text-white shadow-2xs'
+                : 'text-[#60727B] hover:text-[#24343b]'
             }`}
-            style={{ width: `${progressPercent}%` }}
-          />
-        </div>
-      </div>
-
-      {/* 
-        【4|单词行】
-        单词/音标/播放: 放在图片区上方一行小字 (单词+音标+🔊), 不占据卡片主体
-      */}
-      <div className="flex items-center justify-center gap-2 py-1 text-sm select-none">
-        <span className="font-serif font-bold text-lg text-[#1A1A1A] tracking-tight">
-          {currentWord.word}
-        </span>
-        {phonetic && (
-          <span className="font-mono text-xs text-[#666666] tracking-wide">
-            {phonetic}
-          </span>
-        )}
-        <button
-          type="button"
-          onClick={() => playWord(currentWord.word)}
-          className="p-1 text-[#666666] hover:text-[#1C3E2A] rounded-full transition-colors cursor-pointer"
-          title="朗读单词"
-        >
-          <Volume2 className="w-4 h-4 text-[#1C3E2A]" />
-        </button>
-      </div>
-
-      {/* 
-        【3|卡片区(垂直排布,大量留白)】
-        a) 配图: 居中大图, 占页面上半部分, 不加边框装饰;
-           无合适图片时用主题色底+大号emoji兜底, 不留空白
-      */}
-      <div
-        className="w-full aspect-[4/3] max-h-[260px] sm:max-h-[300px] rounded-2xl overflow-hidden relative bg-[#FAF7F0] flex items-center justify-center select-none shadow-xs mt-1"
-        onClick={() => playWord(currentWord.word)}
-      >
-        {currentImageUrl && !imageLoadError ? (
-          <img
-            src={currentImageUrl}
-            alt={currentWord.word}
-            onError={() => setImageLoadError(true)}
-            className="w-full h-full object-cover transition-opacity duration-300"
-            style={{ opacity: isImageLoading ? 0.3 : 1 }}
-          />
-        ) : (
-          <div
-            className={`w-full h-full bg-gradient-to-br ${
-              fallbackScene?.gradient || 'from-emerald-100/60 via-amber-50/70 to-stone-200/50'
-            } flex flex-col items-center justify-center p-4 relative`}
           >
-            <div className="text-[96px] sm:text-[110px] leading-none filter drop-shadow-sm select-none flex items-center justify-center">
-              {fallbackScene?.emojis || '📖✨'}
-            </div>
-            <span className="text-[11px] font-bold text-[#555555] bg-white/85 backdrop-blur-xs px-2.5 py-0.5 rounded-full mt-2 shadow-2xs border border-white/70">
-              {fallbackScene?.bgDesc || 'DSE 核心语境'}
-            </span>
-          </div>
-        )}
-
-        {/* 右上角换图 */}
-        <button
-          type="button"
-          onClick={e => {
-            e.stopPropagation();
-            fileInputRef.current?.click();
-          }}
-          className="absolute top-2.5 right-2.5 bg-black/40 hover:bg-black/60 backdrop-blur-md text-white text-[10px] px-2.5 py-1 rounded-full flex items-center gap-1 transition-all opacity-80 hover:opacity-100 cursor-pointer border border-white/20"
-          title="点击更换图片"
-        >
-          <Camera className="w-3 h-3" />
-          <span>换图</span>
-        </button>
-      </div>
-
-      {/* b) 留白一行 */}
-      <div className="h-4 sm:h-5" />
-
-      {/* 
-        c) 课本原句(核心): 完整原句, 深炭色正文;
-        目标单词用"橙色文字+浅橙底色"高亮 (与现有绿色主题区分明显)
-      */}
-      <div className="w-full bg-[#FAF7F0] border border-[#EAE6DD] rounded-2xl p-4 sm:p-5 flex flex-col gap-2.5 shadow-2xs">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex-1 text-sm sm:text-base text-[#2C2C2C] leading-relaxed">
-            {renderHighlightedSentence(resolvedDse.sentence, currentWord.word)}
-          </div>
+            今日精选 30
+          </button>
           <button
             type="button"
-            onClick={() => playSentence(resolvedDse.sentence)}
-            className="p-1.5 rounded-full bg-white text-[#2C2C2C] border border-[#EAE6DD] hover:bg-[#F2E8D8] transition-transform active:scale-95 shrink-0 shadow-2xs cursor-pointer mt-0.5"
-            title="朗读课本原句"
+            onClick={() => onModeChange?.('fast_review')}
+            className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
+              isFastReview
+                ? 'bg-acc-grad text-white shadow-2xs'
+                : 'text-[#60727B] hover:text-[#24343b]'
+            }`}
           >
-            <Volume2 className="w-4 h-4 text-[#1C3E2A]" />
+            快速 200
           </button>
         </div>
 
-        {/* 来源标注 (Oxford English for HKDSE ...) */}
-        <div className="text-[11px] text-[#777777] font-mono pt-1.5 border-t border-[#EAE6DD]/70 truncate">
-          {sourceDisplayText}
+        {/* 中间：进度指示 */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-mono font-bold text-[#24343b] bg-white border border-[#E6EEF1] px-2.5 py-0.5 rounded-full shadow-2xs">
+            进度 {currentIndex + 1} / {words.length}
+          </span>
+          {consecutiveStreak >= 2 && !isFastReview && (
+            <span className="text-xs text-amber-600 font-bold flex items-center gap-0.5 animate-scaleIn bg-amber-50 border border-amber-200/80 px-2 py-0.5 rounded-full">
+              <Flame className="w-3.5 h-3.5 fill-amber-500 text-amber-500" />
+              <span>连击 ×{consecutiveStreak}</span>
+            </span>
+          )}
+        </div>
+
+        {/* 右侧：快捷入口 (保留为辅操作) */}
+        <div className="flex items-center gap-2 text-xs text-[#7B8F99]">
+          <button
+            type="button"
+            onClick={handleAuxForgotten}
+            title="快捷标记为没记住 (←)"
+            className="hover:text-red-500 transition-colors cursor-pointer px-2 py-0.5 rounded-md hover:bg-red-50/60"
+          >
+            ← 没记住
+          </button>
+          <span className="text-[#CAD8DF]">·</span>
+          <button
+            type="button"
+            onClick={handleAuxRemembered}
+            title="快捷标记为已掌握 (→)"
+            className="hover:text-emerald-600 transition-colors cursor-pointer px-2 py-0.5 rounded-md hover:bg-emerald-50/60"
+          >
+            记住了 →
+          </button>
+          <span className="text-[#CAD8DF]">·</span>
+          <button
+            type="button"
+            onClick={() => playWord(currentWord.word)}
+            title="播放发音 (空格键)"
+            className="hover:text-emerald-600 transition-colors cursor-pointer p-1 rounded-full hover:bg-emerald-50/60"
+          >
+            <Volume2 className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 
-      {/* d) 留白一行 */}
-      <div className="h-3 sm:h-4" />
-
-      {/* 
-        e) 【仅精选30词模式】提示小字: "选择该句中高亮单词的中文意思"
-        f) 【仅精选30词模式】四选一: 4个中文释义卡片, 竖向排列, 大圆角;
-           点击即选中 (选中态: 墨绿描边), 不做对错即时反馈、不弹窗;
-           选完后点「下一个」直接切下一词 (未选也可点下一个, 不阻拦)
+      {/*
+        ════════════════════════════════════════════════════════════════
+        模式 A: 今日精选 30 词 (左图右词 + 中文四选一 + 错误解析卡)
+        ════════════════════════════════════════════════════════════════
       */}
-      {!isFastReview && (
-        <div className="w-full flex flex-col gap-2 animate-fadeIn">
-          <p className="text-xs text-[#777777] text-left pl-1 font-medium">
-            选择该句中高亮单词的中文意思
-          </p>
+      {!isFastReview ? (
+        <div className="flex flex-col gap-4 animate-fadeIn">
+          {/* 主体横版大卡片 (白底、圆角 20px、淡阴影，内部左右比例约 1 : 1.5) */}
+          <div className="sunshine-card rounded-[20px] p-5 sm:p-7 flex flex-col md:flex-row items-stretch gap-6 shadow-[0_6px_20px_rgba(91,139,168,0.10)] bg-white border border-[#E6EEF1] relative">
+            {/* 左栏 · 配图区 (约 250×250px，圆角 16px，占满左栏) */}
+            <div className="w-full md:w-[250px] md:h-[250px] shrink-0 rounded-[16px] overflow-hidden relative border border-[#E6EEF1] bg-[#F7FAFA] flex items-center justify-center select-none shadow-2xs">
+              {fetchedImageUrl ? (
+                <img
+                  src={fetchedImageUrl}
+                  alt={currentWord.word}
+                  className="w-full h-full object-cover transition-transform duration-300 hover:scale-105"
+                  onError={() => setFetchedImageUrl(null)}
+                />
+              ) : (
+                /* 无配图时：中性占位图 (浅渐变底 + 场景 Emoji / 意向)，不留空白 */
+                <div
+                  className={`w-full h-full bg-gradient-to-br ${fallbackScene.gradient} flex flex-col items-center justify-center p-4 text-center`}
+                >
+                  <span className="text-5xl sm:text-6xl mb-2 filter drop-shadow-xs animate-scaleIn">
+                    {fallbackScene.emojis}
+                  </span>
+                  <span className="text-xs font-bold text-[#24343b]/80 tracking-wide font-sans">
+                    {fallbackScene.bgDesc}
+                  </span>
+                </div>
+              )}
 
-          <div className="flex flex-col gap-2.5 w-full">
-            {currentOptions.map((opt) => {
+              {/* 图片角标：场景标签 (浅色圆角胶囊) */}
+              <div className="absolute top-2.5 left-2.5 bg-white/90 backdrop-blur-xs text-[#24343b] text-[11px] font-bold px-2.5 py-0.5 rounded-full border border-black/5 shadow-2xs flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#38d39f]" />
+                <span>{scenarioTag}</span>
+              </div>
+            </div>
+
+            {/* 右栏 · 单词信息区 (垂直排列) */}
+            <div className="flex-1 flex flex-col justify-between py-1 min-w-0">
+              <div className="flex flex-col gap-2">
+                {/* 1. 单词大字 (衬线体 Georgia/Palatino, 38px, 加粗, 深色 #24343b) + 圆形 🔊 发音按钮 */}
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div className="flex items-baseline gap-3">
+                    <h1 className="font-serif-en text-3xl sm:text-[38px] font-bold text-[#24343b] tracking-tight leading-none select-text">
+                      {currentWord.word}
+                    </h1>
+                    {/* 2. 音标 + 词性：如 /spreɪn/　v. 扭伤 */}
+                    <span className="font-serif-en text-xs sm:text-[13px] text-[#768B94]">
+                      {phonetic ? `/${phonetic}/` : ''} {partOfSpeechDisplay}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => playWord(currentWord.word)}
+                    className="w-9 h-9 rounded-full bg-[#FAFDFB] border border-[#E6EEF1] hover:border-[#38d39f] flex items-center justify-center text-emerald-600 hover:text-emerald-700 transition-colors shadow-2xs cursor-pointer"
+                    title="播放发音 (空格键)"
+                  >
+                    <Volume2 className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* 3. 一条极浅分隔线 (#eef4f6) */}
+                <div className="w-full h-[1px] bg-[#EEF4F6] my-1" />
+
+                {/* 4. 英文例句 (14.5px, 目标词变形主色高亮加下划线) */}
+                {exampleEn ? (
+                  <div className="text-[14.5px] leading-relaxed select-text mt-0.5">
+                    {renderHighlightedSentence(exampleEn, currentWord.word)}
+                  </div>
+                ) : (
+                  <div className="text-[14px] text-[#768B94] italic">
+                    {currentWord.word} is a key academic vocabulary word.
+                  </div>
+                )}
+
+                {/* 5. 例句中文翻译 (12-13px 灰色) */}
+                {exampleCn && (
+                  <p className="text-xs sm:text-[13px] text-[#768B94] leading-normal mt-0.5 select-text">
+                    {exampleCn}
+                  </p>
+                )}
+              </div>
+
+              {/* 6. 右下角两个小圆角标签：词性标签 (浅绿底) + 场景标签 (浅橙底) */}
+              <div className="flex items-center gap-2 mt-4 pt-2 border-t border-[#EEF4F6]/60">
+                <span className="text-[11px] font-medium text-emerald-800 bg-[#E8F8F1] px-2.5 py-0.5 rounded-full border border-emerald-200/50">
+                  {partOfSpeechDisplay} 词性
+                </span>
+                <span className="text-[11px] font-medium text-amber-800 bg-[#FFF3E8] px-2.5 py-0.5 rounded-full border border-amber-200/60">
+                  {scenarioTag}
+                </span>
+                {resolvedDse.sourceBook && (
+                  <span className="text-[10px] text-[#96A8B0] font-mono truncate max-w-[220px] ml-auto">
+                    出处: {resolvedDse.sourceBook}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/*
+            ---------------- 四选一答题区 (2×2 网格) ----------------
+            - 未选：白底、圆角 14px、1.5px 浅灰描边
+            - 选对：浅绿底 #e8f8f1 + 绿描边 #38d39f + 绿字加粗 + 末尾 ✓
+            - 选错：浅红底 #fdeeee + 红描边 #ff6b6b + 红字加粗 + 末尾 ✗，同时正确项自动标绿
+            - 选错时错误项抖动动效
+          */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full my-1">
+            {options.map((opt, idx) => {
               const isSelected = selectedOptionId === opt.id;
+              const isCorrectOption = opt.isCorrect;
+
+              let btnStyle =
+                'border-[1.5px] border-[#CAD8DF] bg-white text-[#24343b] hover:border-[#38d39f] hover:bg-[#FAFDFB] shadow-2xs';
+              let badgeIcon = null;
+
+              if (isAnswered) {
+                if (isCorrectOption) {
+                  btnStyle =
+                    'border-[1.5px] border-[#38d39f] bg-[#e8f8f1] text-[#168a62] font-bold shadow-xs';
+                  badgeIcon = <Check className="w-4 h-4 text-[#168a62] stroke-[3]" />;
+                } else if (isSelected && !isCorrectOption) {
+                  btnStyle =
+                    'border-[1.5px] border-[#ff6b6b] bg-[#fdeeee] text-[#e03131] font-bold animate-shake shadow-xs';
+                  badgeIcon = <X className="w-4 h-4 text-[#e03131] stroke-[3]" />;
+                } else {
+                  btnStyle = 'border-[1.5px] border-[#E6EEF1] bg-white/60 text-[#888888] opacity-60';
+                }
+              }
+
               return (
                 <button
                   key={opt.id}
                   type="button"
-                  onClick={() => setSelectedOptionId(opt.id)}
-                  className={`w-full py-3 px-4 rounded-2xl border text-left text-xs sm:text-sm transition-all duration-150 cursor-pointer ${
-                    isSelected
-                      ? 'border-2 border-[#1C3E2A] bg-[#1C3E2A]/5 text-[#1C3E2A] font-semibold ring-1 ring-[#1C3E2A]'
-                      : 'border-[#EAE6DD] bg-white text-[#2C2C2C] hover:border-[#CCCCCC] hover:bg-[#FAF7F0]'
-                  }`}
+                  disabled={isAnswered}
+                  onClick={() => handleSelectOption(opt)}
+                  className={`min-h-[58px] py-3.5 px-4 rounded-[14px] flex items-center justify-between text-left transition-all duration-150 cursor-pointer ${btnStyle}`}
                 >
-                  {opt.meaning}
+                  <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                    <span className="w-5 h-5 rounded-full bg-black/5 text-[11px] font-bold text-[#60727B] flex items-center justify-center shrink-0">
+                      {idx + 1}
+                    </span>
+                    <span className="text-xs sm:text-sm leading-snug truncate">{opt.meaning}</span>
+                  </div>
+                  {badgeIcon}
                 </button>
               );
             })}
           </div>
+
+          {/*
+            ---------------- 五、选错后展开的解析卡 (四段式) ----------------
+            答错时平滑展开 (答对不展开)
+            ① 同义词 / 近义词: 绿色小胶囊 [twist] [wrench]
+            ② 词组搭配: 常见搭配 + 中文
+            ③ 单词变形: 并列展示
+            ④ 底部一行小字: 错词已自动加入错误循环 +「继续 (Enter)」按钮
+          */}
+          {isAnswered && isWrongPick && (
+            <div className="w-full bg-white border border-[#E6EEF1] rounded-[18px] p-5 sm:p-6 shadow-xs animate-fadeIn flex flex-col gap-4">
+              <div className="flex items-center justify-between pb-3 border-b border-[#E6EEF1]">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-red-400" />
+                  <h4 className="text-sm font-bold text-[#24343b]">
+                    正确释义：
+                    <span className="text-emerald-700 font-serif-en text-base ml-1">
+                      {currentWord.word}
+                    </span>
+                    <span className="text-[#24343b] ml-1.5 font-sans font-normal">
+                      —— {targetMeaning}
+                    </span>
+                  </h4>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleGoNext}
+                  className="px-4 py-1.5 bg-acc-grad text-white text-xs font-bold rounded-xl shadow-2xs hover:opacity-95 transition-opacity flex items-center gap-1 cursor-pointer"
+                >
+                  <span>继续 (Enter)</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* ① 同义词 / 近义词 */}
+              {analysis.synonyms.length > 0 && (
+                <div className="flex flex-col gap-1.5 text-left">
+                  <span className="text-xs font-bold text-[#768B94]">① 同义词 / 近义词</span>
+                  <div className="flex flex-wrap gap-2">
+                    {analysis.synonyms.map((syn, idx) => (
+                      <span
+                        key={idx}
+                        className="inline-flex items-center gap-1 bg-[#E8F8F1] border border-[#38d39f]/40 text-[#168a62] px-3 py-1 rounded-full text-xs font-mono font-medium"
+                      >
+                        <span>{syn.word}</span>
+                        {syn.meaning && (
+                          <span className="text-[11px] text-emerald-800/80">({syn.meaning})</span>
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ② 词组搭配 */}
+              {analysis.collocations.length > 0 && (
+                <div className="flex flex-col gap-1.5 text-left">
+                  <span className="text-xs font-bold text-[#768B94]">② 词组搭配</span>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-[#24343b]">
+                    {analysis.collocations.map((col, idx) => (
+                      <span key={idx} className="bg-[#FAFDFB] border border-[#E6EEF1] px-2.5 py-1 rounded-lg">
+                        <span className="font-semibold text-[#168a62]">{col.phrase}</span>
+                        {col.meaning && <span className="text-[#60727B] ml-1">{col.meaning}</span>}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ③ 单词变形 */}
+              {analysis.forms.length > 0 && (
+                <div className="flex flex-col gap-1.5 text-left">
+                  <span className="text-xs font-bold text-[#768B94]">③ 单词变形</span>
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    {analysis.forms.map((fm, idx) => (
+                      <span key={idx} className="bg-[#F7FAFA] border border-[#E6EEF1] px-2.5 py-1 rounded-lg flex items-center gap-1 font-mono">
+                        <span className="font-bold text-[#24343b]">{fm.word}</span>
+                        {fm.pos && <span className="text-[#96A8B0] text-[10px]">({fm.pos})</span>}
+                        {fm.meaning && <span className="text-[#768B94] text-[11px]">{fm.meaning}</span>}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ④ 底部一行小字 */}
+              <div className="pt-2 border-t border-[#EEF4F6] text-[11px] text-[#96A8B0] flex items-center justify-between">
+                <span>错词已自动加入错误循环，明天会再见到它</span>
+                <span className="font-mono text-[#CAD8DF]">按 Enter 键快速继续 →</span>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        /*
+          ════════════════════════════════════════════════════════════════
+          模式 B: 快速 200 词 (完全不动：6 秒自动过词、沉浸复习)
+          ════════════════════════════════════════════════════════════════
+        */
+        <div className="flex flex-col gap-4 animate-fadeIn">
+          <div className="sunshine-card rounded-[22px] p-8 sm:p-12 flex flex-col items-center justify-center text-center relative min-h-[380px]">
+            {/* 暂停/播放微型控制键 */}
+            <button
+              type="button"
+              onClick={() => setIsPaused(p => !p)}
+              className="absolute top-4 right-4 p-2 rounded-full border border-[#E6EEF1] text-[#768B94] hover:text-[#24343b] bg-[#FAFDFB] cursor-pointer"
+              title={isPaused ? '恢复自动过词' : '暂停过词'}
+            >
+              {isPaused ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
+            </button>
+
+            {/* 单词大字 */}
+            <h1 className="font-serif-en text-4xl sm:text-5xl md:text-6xl font-bold text-[#24343b] tracking-tight mb-2 select-text">
+              {currentWord.word}
+            </h1>
+
+            {/* 极简音标 + 🔊发音按钮 */}
+            <div className="flex items-center justify-center gap-2 mb-6">
+              {phonetic && (
+                <span className="text-sm sm:text-base text-[#7B8F99] font-mono">
+                  /{phonetic}/
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => playWord(currentWord.word)}
+                className="w-8 h-8 rounded-full bg-[#FAFDFB] border border-[#E6EEF1] hover:border-[#38d39f] flex items-center justify-center text-emerald-600 hover:text-emerald-700 transition-colors shadow-2xs cursor-pointer"
+                title="播放单词发音"
+              >
+                <Volume2 className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* 中文释义 */}
+            <div className="w-full max-w-md mx-auto bg-[#FAFDFB] border border-[#E6EEF1] rounded-2xl p-4 text-center my-3">
+              <p className="text-lg sm:text-xl font-bold text-[#24343b] leading-snug">
+                {targetMeaning}
+              </p>
+              {analysis.synonyms.length > 0 && (
+                <p className="text-xs text-[#7B8F99] mt-2 font-mono truncate">
+                  同义: {analysis.synonyms.slice(0, 3).map(s => s.word).join(' / ')}
+                </p>
+              )}
+            </div>
+
+            {/* 6 秒收缩进度指示 */}
+            <div className="w-48 h-1.5 bg-[#E6EEF1] rounded-full overflow-hidden mt-4">
+              <div
+                className="h-full bg-acc-grad transition-all duration-100 ease-linear rounded-full"
+                style={{
+                  width: `${Math.max(0, 100 - (elapsedMs / FAST_REVIEW_DURATION_MS) * 100)}%`,
+                }}
+              />
+            </div>
+            <span className="text-[10px] text-[#A6B8BF] font-mono mt-1.5">
+              {isPaused ? '已暂停' : `${Math.ceil((FAST_REVIEW_DURATION_MS - elapsedMs) / 1000)}s 自动切词`}
+            </span>
+          </div>
+
+          {/* 模式 B 底部前后翻页控制 */}
+          <div className="flex items-center justify-center gap-4 mt-2">
+            <button
+              type="button"
+              onClick={handleGoPrev}
+              disabled={currentIndex === 0}
+              className="px-5 py-2.5 rounded-xl border border-[#CAD8DF] bg-white text-xs font-bold text-[#60727B] disabled:opacity-40 cursor-pointer flex items-center gap-1"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>上一词</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleGoNext}
+              className="px-6 py-2.5 rounded-xl bg-acc-grad text-white text-xs font-bold shadow-xs cursor-pointer flex items-center gap-1"
+            >
+              <span>下一词</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       )}
 
-      {/* 
-        【4|底部按钮(两种模式共用)】
-        仅两个大按钮: 👈 上一个 ｜ 下一个 👉
-        不显示: 中文释义(默认隐藏)、同义词、计时、得分
+      {/*
+        ---------------- 底部细进度条 (渐变填充) ----------------
+        左右显示「进度 X / Y」「连击 ×N」
       */}
-      <div className="flex items-center gap-3 w-full mt-4">
-        <button
-          type="button"
-          disabled={currentIndex === 0}
-          onClick={goToPrevWord}
-          className={`flex-1 h-12 rounded-2xl font-bold text-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-            currentIndex === 0
-              ? 'bg-[#F2EFE8] text-[#AAAAAA] cursor-not-allowed border border-[#EAE6DD]'
-              : 'bg-white hover:bg-[#FAF7F0] text-[#2C2C2C] border border-[#DDD7CC] shadow-2xs'
-          }`}
-        >
-          <span>👈 上一个</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={goToNextWord}
-          className="flex-1 h-12 rounded-2xl font-bold text-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer bg-[#1C3E2A] hover:bg-[#142E1F] text-white shadow-xs"
-        >
-          <span>{currentIndex >= words.length - 1 ? '完成 ✓' : '下一个 👉'}</span>
-        </button>
+      <div className="w-full mt-6 pt-2">
+        <div className="flex items-center justify-between text-[11px] font-mono text-[#96A8B0] mb-1.5">
+          <span>进度 {currentIndex + 1} / {words.length}</span>
+          <span>{consecutiveStreak > 0 ? `连击 ×${consecutiveStreak}` : '专注记忆'}</span>
+        </div>
+        <div className="w-full bg-[#EAE6DD]/70 h-[2.5px] rounded-full overflow-hidden">
+          <div
+            className="bg-acc-grad h-full rounded-full transition-all duration-300 ease-out"
+            style={{
+              width: `${Math.round(((currentIndex + 1) / words.length) * 100)}%`,
+            }}
+          />
+        </div>
       </div>
     </div>
   );

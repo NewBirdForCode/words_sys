@@ -3,6 +3,8 @@ import { Wordbook, WordItem } from '../types';
 import { VOCABULARY_BANK } from '../data/vocabulary';
 import { SYSTEM_WORDBOOKS_PRESETS } from '../data/systemWordbooks';
 
+import { TEST_200_WORDBOOK } from '../data/test200Wordbook';
+
 const STORAGE_KEY_WORDBOOKS = 'daily30_wordbooks_v1';
 const STORAGE_KEY_ACTIVE_WORDBOOK_ID = 'daily30_active_wb_id_v1';
 
@@ -43,19 +45,26 @@ export function getDefaultWordbook(): Wordbook {
 }
 
 export function getAllWordbooks(): Wordbook[] {
-  if (typeof window === 'undefined') return [getDefaultWordbook()];
+  if (typeof window === 'undefined') return [getDefaultWordbook(), TEST_200_WORDBOOK];
   try {
     const raw = localStorage.getItem(STORAGE_KEY_WORDBOOKS);
     if (!raw) {
       const def = getDefaultWordbook();
-      localStorage.setItem(STORAGE_KEY_WORDBOOKS, JSON.stringify([def]));
-      return [def];
+      const initial = [def, TEST_200_WORDBOOK];
+      localStorage.setItem(STORAGE_KEY_WORDBOOKS, JSON.stringify(initial));
+      return initial;
     }
-    const list = JSON.parse(raw) as Wordbook[];
+    let list = JSON.parse(raw) as Wordbook[];
     if (list.length === 0) {
       const def = getDefaultWordbook();
-      localStorage.setItem(STORAGE_KEY_WORDBOOKS, JSON.stringify([def]));
-      return [def];
+      const initial = [def, TEST_200_WORDBOOK];
+      localStorage.setItem(STORAGE_KEY_WORDBOOKS, JSON.stringify(initial));
+      return initial;
+    }
+    // 保证「测试词库 · 200 词」已就绪供一键验证
+    if (!list.some(wb => wb.id === TEST_200_WORDBOOK.id || wb.name === TEST_200_WORDBOOK.name)) {
+      list = [TEST_200_WORDBOOK, ...list];
+      localStorage.setItem(STORAGE_KEY_WORDBOOKS, JSON.stringify(list));
     }
     // 保证字段完整性: 无 category 的旧词库统一归"我的词库"并标"未分类"
     return list.map(wb => ({

@@ -83,7 +83,11 @@ export function resolveDseContent(wordItem?: WordItem): ResolvedDseContent {
         ? 'DSE 课本原句库' 
         : 'AI 生成例句｜非课本原句';
 
-    const validSynonyms = Array.isArray(wordItem.synonyms) ? wordItem.synonyms.filter(s => Boolean(s && s.trim())) : [];
+    const validSynonyms = Array.isArray(wordItem.synonyms)
+      ? wordItem.synonyms
+          .map(s => (typeof s === 'string' ? s.trim() : (s?.word || '').trim()))
+          .filter(Boolean)
+      : [];
 
     return {
       targetWord: rawWord,
@@ -103,7 +107,11 @@ export function resolveDseContent(wordItem?: WordItem): ResolvedDseContent {
   // 3. 兜底生成机制 (原句不存在)
   const candidateSentence = (wordItem.exampleSentence || wordItem.exampleEn || '').trim();
   const fallbackSentence = candidateSentence || `Understanding the fundamental application of ${rawWord} is critical in formal academic communication.`;
-  const validSynonyms = Array.isArray(wordItem.synonyms) ? wordItem.synonyms.filter(s => Boolean(s && s.trim())) : [];
+  const validSynonyms = Array.isArray(wordItem.synonyms)
+    ? wordItem.synonyms
+        .map(s => (typeof s === 'string' ? s.trim() : (s?.word || '').trim()))
+        .filter(Boolean)
+    : [];
 
   return {
     targetWord: rawWord,

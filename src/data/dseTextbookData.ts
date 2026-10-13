@@ -322,6 +322,21 @@ export const DSE_TEXTBOOK_DATABASE: Record<string, DseTextbookRecord> = {
     sentence_status: 'verified',
     content_version: 'v2.1-DSE-2026',
   },
+
+  // 21. bolster
+  bolster: {
+    word: 'bolster',
+    textbook_sentence: 'The government introduced new economic subsidies to bolster public confidence and stimulate local enterprise growth.',
+    sentence_source_type: 'textbook',
+    source_book: 'Oxford English for HKDSE (Theme: Economic Growth)',
+    source_unit: 'Book 5A Unit 3: Commerce & Enterprise',
+    source_page: 'p.45',
+    source_reference: 'DSE-TXT-2025-U03B',
+    synonyms: ['reinforce', 'strengthen', 'support', 'boost', 'buttress'],
+    synonym_source: 'HKDSE High-Frequency Collocations & Synonyms Archive',
+    sentence_status: 'verified',
+    content_version: 'v2.1-DSE-2026',
+  },
 };
 
 /**

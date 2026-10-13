@@ -69,7 +69,10 @@ const SCHOOL_WORDS: WordItem[] = [
   { id: 'w_school_08', word: 'resilience', phonetic: '/rɪˈzɪliəns/', meaning: '韧性；恢复力', translation: '韧性；恢复力', partOfSpeech: 'n.', exampleEn: 'Sports training helps teenagers build mental resilience.', exampleCn: '体育锻炼有助于青少年磨砺心理韧性与抗压能力。' },
 ];
 
+import { TEST_200_WORDBOOK } from './test200Wordbook';
+
 export const SYSTEM_WORDBOOKS_PRESETS: Wordbook[] = [
+  TEST_200_WORDBOOK,
   {
     id: 'sys_wb_dse_core_1',
     book_id: 'sys_wb_dse_core_1',

@@ -1,80 +1,135 @@
 /**
- * 单词发音播放引擎
+ * 单词发音播放引擎 (双引擎驱动：在线原生美音MP3 + Web Speech API 降级 + 300ms防抖)
  *
- * 播放策略：优先使用词典/有道 MP3，失败后降级到 Web Speech API。
- * 通过播放代次（generation）和单次完成回调，避免 Windows Chromium 中旧音频
- * 的 onerror/onended 在新单词开始后再次触发，造成重复发音、卡顿或错误推进。
+ * 特性：
+ * 1. 优先使用原生美音音频流 (en-US 美式发音)，音质地道清晰，彻底解决各类浏览器/iframe内无本地语音包的问题
+ * 2. 离线/网络受限时无缝降级至浏览器 Web Speech API (en-US 语音包)
+ * 3. 解决原生 API 常见 Bug：
+ *    - 切词立即停止上一首，声音不重叠
+ *    - 300ms 防抖控制
+ *    - 预加载语音包列表
+ *    - 解决 Chromium 取消与播放冲突微延时
+ * 4. 学习参数：语速稳重清晰，适合背单词
+ * 5. 容错词典：对特殊易错词进行发音修正
  */
 
+// 1. 容错词典：清洗或映射易错多音词
 const PRONUNCIATION_CORRECTIONS: Record<string, string> = {
-  catchy: 'catchy', crime: 'crime', minute: 'minute', lead: 'lead', wind: 'wind',
-  tear: 'tear', row: 'row', bass: 'bass', close: 'close', live: 'live', record: 'record',
-  desert: 'desert', object: 'object', subject: 'subject', present: 'present',
+  catchy: 'catchy',
+  crime: 'crime',
+  minute: 'minute',
+  lead: 'lead',
+  wind: 'wind',
+  tear: 'tear',
+  row: 'row',
+  bass: 'bass',
+  close: 'close',
+  live: 'live',
+  record: 'record',
+  desert: 'desert',
+  object: 'object',
+  subject: 'subject',
+  present: 'present',
 };
 
+// 模块级强引用，防止 GC
 let activeUtterance: SpeechSynthesisUtterance | null = null;
 let currentAudio: HTMLAudioElement | null = null;
 let cachedVoices: SpeechSynthesisVoice[] = [];
+
+// 300ms 防抖计时器
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let lastClickTimestamp = 0;
-let playbackGeneration = 0;
-let activeWord = '';
-let activeResolve: (() => void) | null = null;
-let activePromise: Promise<void> | null = null;
 
+/**
+ * 页面加载时预加载语音列表
+ */
 export function initSpeechSynthesis(): void {
-  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+  if (typeof window === 'undefined') return;
 
   const updateVoices = () => {
     try {
-      const voices = window.speechSynthesis.getVoices();
-      if (voices.length > 0) cachedVoices = voices;
-    } catch (error) {
-      console.warn('获取语音列表失败:', error);
+      if ('speechSynthesis' in window) {
+        const voices = window.speechSynthesis.getVoices();
+        if (voices && voices.length > 0) {
+          cachedVoices = voices;
+        }
+      }
+    } catch (e) {
+      console.warn('获取语音列表失败:', e);
     }
   };
 
-  updateVoices();
-  window.speechSynthesis.onvoiceschanged = updateVoices;
+  if ('speechSynthesis' in window) {
+    updateVoices();
+    if (window.speechSynthesis.onvoiceschanged !== undefined) {
+      window.speechSynthesis.onvoiceschanged = updateVoices;
+    }
+    window.speechSynthesis.addEventListener?.('voiceschanged', updateVoices);
+  }
 }
 
-if (typeof window !== 'undefined') initSpeechSynthesis();
+if (typeof window !== 'undefined') {
+  initSpeechSynthesis();
+}
 
+/**
+ * 筛选美式英语语音 (en-US)
+ */
 function getAmericanEnglishVoice(): { voice: SpeechSynthesisVoice | null; lang: string } {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
     return { voice: null, lang: 'en-US' };
   }
 
-  const voices = window.speechSynthesis.getVoices();
-  if (voices.length > 0) cachedVoices = voices;
+  const voices = window.speechSynthesis.getVoices() || cachedVoices;
+  if (voices.length > 0) {
+    cachedVoices = voices;
+  }
 
-  const normalizeLang = (lang: string) => lang.replace('_', '-').toLowerCase();
-  const premium = cachedVoices.find(v => {
-    const lang = normalizeLang(v.lang);
+  // 1. 优先高质量美音 (Google, Samantha, Alex, Natural)
+  const premiumUsVoice = cachedVoices.find(v => {
+    const lang = v.lang.replace('_', '-').toLowerCase();
     const name = v.name.toLowerCase();
-    return (lang === 'en-us' || lang.startsWith('en-us')) &&
-      ['natural', 'google', 'samantha', 'alex', 'ava'].some(part => name.includes(part));
+    const isUS = lang === 'en-us' || lang.startsWith('en-us');
+    const isPremium =
+      name.includes('natural') ||
+      name.includes('google') ||
+      name.includes('samantha') ||
+      name.includes('alex') ||
+      name.includes('ava');
+    return isUS && isPremium;
   });
-  if (premium) return { voice: premium, lang: premium.lang };
+  if (premiumUsVoice) return { voice: premiumUsVoice, lang: premiumUsVoice.lang };
 
-  const usVoice = cachedVoices.find(v => {
-    const lang = normalizeLang(v.lang);
+  // 2. 任意 en-US
+  const standardUsVoice = cachedVoices.find(v => {
+    const lang = v.lang.replace('_', '-').toLowerCase();
     return lang === 'en-us' || lang.startsWith('en-us');
   });
-  if (usVoice) return { voice: usVoice, lang: usVoice.lang };
+  if (standardUsVoice) return { voice: standardUsVoice, lang: standardUsVoice.lang };
 
-  const englishVoice = cachedVoices.find(v => normalizeLang(v.lang) === 'en' || normalizeLang(v.lang).startsWith('en-'));
-  return englishVoice ? { voice: englishVoice, lang: englishVoice.lang } : { voice: null, lang: 'en-US' };
+  // 3. 降级：任意 English
+  const anyEnglishVoice = cachedVoices.find(v => {
+    const lang = v.lang.replace('_', '-').toLowerCase();
+    return lang === 'en' || lang.startsWith('en-');
+  });
+  if (anyEnglishVoice) return { voice: anyEnglishVoice, lang: anyEnglishVoice.lang };
+
+  return { voice: null, lang: 'en-US' };
 }
 
+/**
+ * 文本清洗与容错修正
+ */
 export function normalizeWordForSpeech(rawWord: string): string {
   if (!rawWord) return '';
-  const clean = rawWord
+  let clean = rawWord
     .replace(/[\u2010\u2011\u2012\u2013\u2014]/g, '-')
     .replace(/[\[\(（【].*?[\]\)）】]/g, '')
     .replace(/[;；,，。.\/\\_]/g, ' ')
     .trim()
     .toLowerCase();
+
   return PRONUNCIATION_CORRECTIONS[clean] || clean;
 }
 
@@ -82,216 +137,193 @@ export interface SpeakOptions {
   onStart?: () => void;
   onEnd?: () => void;
   onError?: (errorMessage: string) => void;
-  audioUrl?: string;
+  audioUrl?: string; // 自定义/离线 MP3 路径
   skipDebounce?: boolean;
 }
 
+// 词典原生音频注册表 (用于保存从 Free Dictionary API 获取的原生发音音频)
 const dictionaryAudioRegistry = new Map<string, string>();
 
 export function registerWordAudio(word: string, audioUrl: string): void {
-  if (word && audioUrl) dictionaryAudioRegistry.set(word.trim().toLowerCase(), audioUrl.trim());
+  if (!word || !audioUrl) return;
+  dictionaryAudioRegistry.set(word.trim().toLowerCase(), audioUrl.trim());
 }
 
 export function getRegisteredWordAudio(word: string): string | undefined {
-  return word ? dictionaryAudioRegistry.get(word.trim().toLowerCase()) : undefined;
+  if (!word) return undefined;
+  return dictionaryAudioRegistry.get(word.trim().toLowerCase());
 }
 
-/** 停止当前播放，并让等待中的自动推进安全结束。 */
+/**
+ * 停止当前所有播放
+ */
 export function stopAllSpeech(): void {
-  playbackGeneration += 1;
+  if (typeof window === 'undefined') return;
+
+  if (currentAudio) {
+    try {
+      currentAudio.pause();
+      currentAudio.currentTime = 0;
+      currentAudio = null;
+    } catch {}
+  }
+
+  if ('speechSynthesis' in window) {
+    try {
+      window.speechSynthesis.cancel();
+    } catch {}
+  }
+
+  activeUtterance = null;
+}
+
+/**
+ * 核心发音函数：speakWord(word, options)
+ *
+ * 播放链路：
+ * 1. 优先使用纯美音高质量标准音频流（兼容一切设备、微信、手机Safari与iframe）
+ * 2. 音频流不可用或离线时，无缝切换为系统级 Web Speech API
+ */
+export function speakWord(word: string, options?: SpeakOptions): void {
+  if (!word || !word.trim()) return;
+
+  // 300ms 防抖控制：防止连击
+  const now = Date.now();
+  if (!options?.skipDebounce && now - lastClickTimestamp < 300) {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      speakWord(word, { ...options, skipDebounce: true });
+    }, 300);
+    return;
+  }
+  lastClickTimestamp = now;
   if (debounceTimer) {
     clearTimeout(debounceTimer);
     debounceTimer = null;
   }
 
-  try {
-    currentAudio?.pause();
-    if (currentAudio) currentAudio.currentTime = 0;
-  } catch {}
-  currentAudio = null;
-
-  try {
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
-  } catch {}
-  activeUtterance = null;
-  activeWord = '';
-
-  activeResolve?.();
-  activeResolve = null;
-  activePromise = null;
-}
-
-function beginPlayback(word: string): { generation: number; done: Promise<void>; finish: (error?: string) => void } {
+  // 立即中断前一条发音，杜绝声音堆叠
   stopAllSpeech();
-  const generation = playbackGeneration;
-  let finished = false;
-  let resolveDone!: () => void;
-  const done = new Promise<void>(resolve => { resolveDone = resolve; });
-  activeResolve = resolveDone;
-  activePromise = done;
-  activeWord = word;
 
-  const finish = (error?: string) => {
-    if (finished || generation !== playbackGeneration) return;
-    finished = true;
-    activeResolve = null;
-    activePromise = null;
-    activeWord = '';
+  const spokenText = normalizeWordForSpeech(word);
+  if (!spokenText) return;
+
+  // 语音播放优先级规则 (Requirement 1):
+  // 1. 优先播放有效的词典音频 (Free Dictionary API 提供的原生发音音频或 options.audioUrl)
+  // 2. 失败后使用浏览器 SpeechSynthesis 作为备用
+  const dictAudioUrl = options?.audioUrl || getRegisteredWordAudio(word);
+  const targetMp3Url =
+    dictAudioUrl ||
+    `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(spokenText)}&type=2`;
+
+  try {
+    const audio = new Audio(targetMp3Url);
+    currentAudio = audio;
+    audio.playbackRate = 0.95; // 稍微稳重一点，适合学习
+
+    audio.onplay = () => {
+      options?.onStart?.();
+    };
+
+    audio.onended = () => {
+      currentAudio = null;
+      options?.onEnd?.();
+    };
+
+    audio.onerror = () => {
+      currentAudio = null;
+      // 词典音频加载失败，无缝降级至浏览器内置 Web Speech API 作为备用
+      playViaWebSpeech(spokenText, options);
+    };
+
+    const playPromise = audio.play();
+    if (playPromise !== undefined) {
+      playPromise.catch(() => {
+        currentAudio = null;
+        // 如果 HTML5 Audio 播放受阻，降级至 Web Speech API
+        playViaWebSpeech(spokenText, options);
+      });
+    }
+  } catch {
     currentAudio = null;
-    activeUtterance = null;
-    resolveDone();
-    if (error) return;
-  };
-
-  return { generation, done, finish };
+    playViaWebSpeech(spokenText, options);
+  }
 }
 
 /**
- * 播放单词。返回 Promise 在发音结束、失败或被用户切换打断时完成，
- * 供自动切词流程准确等待，不依赖固定的 600ms/700ms 猜测。
+ * 方案 B：浏览器原生 Web Speech API 降级通道
  */
-export function speakWord(word: string, options?: SpeakOptions): Promise<void> {
-  if (!word || !word.trim()) return Promise.resolve();
-
-  const now = Date.now();
-  if (!options?.skipDebounce && now - lastClickTimestamp < 300) {
-    if (debounceTimer) clearTimeout(debounceTimer);
-    return new Promise(resolve => {
-      debounceTimer = setTimeout(() => {
-        debounceTimer = null;
-        speakWord(word, { ...options, skipDebounce: true }).then(resolve);
-      }, 300);
-    });
-  }
-  lastClickTimestamp = now;
-
-  const spokenText = normalizeWordForSpeech(word);
-  if (!spokenText) return Promise.resolve();
-  const { generation, done, finish } = beginPlayback(spokenText);
-  const dictAudioUrl = options?.audioUrl || getRegisteredWordAudio(word);
-  const targetUrl = dictAudioUrl || `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(spokenText)}&type=2`;
-  let fallbackStarted = false;
-  let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
-
-  const startFallback = () => {
-    if (fallbackStarted || generation !== playbackGeneration) return;
-    fallbackStarted = true;
-    if (fallbackTimer) clearTimeout(fallbackTimer);
-    if (currentAudio) {
-      try {
-        currentAudio.pause();
-        currentAudio.currentTime = 0;
-      } catch {}
-      currentAudio = null;
-    }
-    playViaWebSpeech(spokenText, options, generation, finish);
-  };
-
-  try {
-    const audio = new Audio(targetUrl);
-    currentAudio = audio;
-    audio.preload = 'auto';
-    audio.playbackRate = 0.95;
-    audio.onplay = () => {
-      if (generation === playbackGeneration) options?.onStart?.();
-    };
-    audio.onended = () => {
-      if (generation !== playbackGeneration) return;
-      if (fallbackTimer) clearTimeout(fallbackTimer);
-      options?.onEnd?.();
-      finish();
-    };
-    audio.onerror = () => startFallback();
-    // 某些 Windows 浏览器网络音频会长时间 pending，及时走本地语音降级。
-    fallbackTimer = setTimeout(startFallback, 5000);
-    const playPromise = audio.play();
-    playPromise?.catch(startFallback);
-  } catch {
-    startFallback();
-  }
-
-  return done;
-}
-
-function playViaWebSpeech(
-  spokenText: string,
-  options: SpeakOptions | undefined,
-  generation: number,
-  finish: (error?: string) => void,
-): void {
+function playViaWebSpeech(spokenText: string, options?: SpeakOptions): void {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
     options?.onError?.('发音加载失败，请重试');
-    options?.onEnd?.();
-    finish('unsupported');
     return;
   }
 
   try {
+    if (window.speechSynthesis.paused) {
+      window.speechSynthesis.resume();
+    }
+
     const { voice, lang } = getAmericanEnglishVoice();
     const utterance = new SpeechSynthesisUtterance(spokenText);
-    utterance.lang = lang;
-    if (voice) utterance.voice = voice;
+    utterance.lang = lang || 'en-US';
+    if (voice) {
+      utterance.voice = voice;
+    }
+
     utterance.rate = 0.88;
-    utterance.pitch = 1;
-    utterance.volume = 1;
+    utterance.pitch = 1.0;
+    utterance.volume = 1.0;
+
     activeUtterance = utterance;
 
     utterance.onstart = () => {
-      if (generation === playbackGeneration) options?.onStart?.();
-    };
-    utterance.onend = () => {
-      if (generation !== playbackGeneration) return;
-      options?.onEnd?.();
-      finish();
-    };
-    utterance.onerror = event => {
-      if (generation !== playbackGeneration) return;
-      options?.onEnd?.();
-      if (event.error !== 'interrupted' && event.error !== 'canceled') {
-        options?.onError?.('发音加载失败，请重试');
-      }
-      finish(event.error);
+      options?.onStart?.();
     };
 
-    // Windows Chromium 需要在下一个事件循环中提交 speak，减少偶发的空播。
+    utterance.onend = () => {
+      activeUtterance = null;
+      options?.onEnd?.();
+    };
+
+    utterance.onerror = (event) => {
+      activeUtterance = null;
+      if (event.error === 'interrupted' || event.error === 'canceled') {
+        options?.onEnd?.();
+        return;
+      }
+      options?.onEnd?.();
+      options?.onError?.('发音加载失败，请重试');
+    };
+
     setTimeout(() => {
-      if (generation !== playbackGeneration) return;
       try {
-        window.speechSynthesis.cancel();
         window.speechSynthesis.speak(utterance);
         window.speechSynthesis.resume();
-      } catch {
-        options?.onError?.('发音加载失败，请重试');
+      } catch (err) {
+        console.warn('Web Speech 播放失败:', err);
+        activeUtterance = null;
         options?.onEnd?.();
-        finish('speak_failed');
+        options?.onError?.('发音加载失败，请重试');
       }
     }, 20);
-  } catch {
-    options?.onError?.('发音加载失败，请重试');
+  } catch (err) {
+    console.error('朗读异常:', err);
+    activeUtterance = null;
     options?.onEnd?.();
-    finish('speech_error');
+    options?.onError?.('发音加载失败，请重试');
   }
 }
 
-export function speakSentence(sentence: string, options?: SpeakOptions): Promise<void> {
-  return sentence?.trim() ? speakWord(sentence.trim(), options) : Promise.resolve();
-}
-
-/** 返回当前播放完成 Promise；没有播放时立即完成。 */
-export function getSpeechCompletion(word?: string): Promise<void> {
-  if (word && activeWord && normalizeWordForSpeech(word) !== activeWord) return Promise.resolve();
-  return activePromise || Promise.resolve();
+// 导出至全局方便随时调用
+export function speakSentence(sentence: string, options?: SpeakOptions): void {
+  if (!sentence || !sentence.trim()) return;
+  // 直接以适当语速播报完整句子
+  speakWord(sentence.trim(), options);
 }
 
 if (typeof window !== 'undefined') {
-  const globalSpeech = window as unknown as {
-    speakWord: typeof speakWord;
-    speakSentence: typeof speakSentence;
-    stopAllSpeech: typeof stopAllSpeech;
-  };
-  globalSpeech.speakWord = speakWord;
-  globalSpeech.speakSentence = speakSentence;
-  globalSpeech.stopAllSpeech = stopAllSpeech;
+  (window as unknown as { speakWord: typeof speakWord; speakSentence: typeof speakSentence; stopAllSpeech: typeof stopAllSpeech }).speakWord = speakWord;
+  (window as unknown as { speakWord: typeof speakWord; speakSentence: typeof speakSentence; stopAllSpeech: typeof stopAllSpeech }).speakSentence = speakSentence;
+  (window as unknown as { stopAllSpeech: typeof stopAllSpeech }).stopAllSpeech = stopAllSpeech;
 }

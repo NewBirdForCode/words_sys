@@ -46,6 +46,7 @@ export function saveWordImage(word: string, imageUrl: string): void {
  */
 const CURATED_REAL_PHOTOS: Record<string, string> = {
   apple: 'https://images.unsplash.com/photo-1560806887-1e4cd0b6cbd6?w=600&auto=format&fit=crop&q=80',
+  sprain: 'https://images.unsplash.com/photo-1579684385127-1ef15d508118?w=600&auto=format&fit=crop&q=80',
   mountain: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=600&auto=format&fit=crop&q=80',
   ocean: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=600&auto=format&fit=crop&q=80',
   book: 'https://images.unsplash.com/photo-1495446815901-a7297e633e8d?w=600&auto=format&fit=crop&q=80',
@@ -164,6 +165,8 @@ const EMOJI_KEYWORD_RULES: Array<{
   { regex: /opportun|chance|future|fortune|career|open/i, emojis: '🚪✨', gradient: 'from-yellow-100 via-amber-50 to-orange-100', bgDesc: '机遇良机' },
   // 环境、生态
   { regex: /environ|ecolog|climate|planet|green|earth/i, emojis: '🌍🌿', gradient: 'from-emerald-100 via-teal-50 to-lime-200', bgDesc: '生态环境' },
+  // 支持、增强、巩固 (bolster, reinforce, strengthen, support, consolidate)
+  { regex: /bolster|support|strengthen|reinforce|consolidate|prop up/i, emojis: '🧱🛡️', gradient: 'from-amber-100 via-stone-50 to-emerald-100', bgDesc: '巩固支撑' },
 ];
 
 /**
@@ -195,52 +198,28 @@ export function getFallbackScene(word: string, meaning: string = ''): FallbackSc
 }
 
 /**
- * 异步获取单词最佳实拍图片
- * 1. 查缓存
- * 2. 查精选实拍库
- * 3. 查维基媒体开放真实百科摄影图库 (带有缩略图)
- * 4. 若全无则返回 null (组件无缝使用 Emoji 场景兜底)
+ * 获取单词最佳实拍图片
+ * 严格遵循真实度与准确性原则：
+ * 1. 优先读取用户自主拍照/上传的自定义实拍 (data:image)
+ * 2. 仅对精选库中已核实的具象实词 (CURATED_REAL_PHOTOS) 提供实拍图片
+ * 3. 抽象词/动词/虚词严禁抓取无关网图（避免将 bolster 误配为枕垫图案）
+ * 4. 无可靠具象图片时返回 null，由卡片呈现雅致语义场景 Emoji 与突出原文例句
  */
 export async function fetchWordImage(word: string): Promise<string | null> {
   const cleanWord = word.trim().toLowerCase();
   if (!cleanWord) return null;
 
-  // 1. 本地缓存秒开
-  if (memoryImageCache[cleanWord]) {
+  // 1. 本地自定义上传缓存 (仅保留用户自定义 base64 数据图)
+  if (memoryImageCache[cleanWord] && memoryImageCache[cleanWord].startsWith('data:image')) {
     return memoryImageCache[cleanWord];
   }
 
-  // 2. 精选高清实拍词库
+  // 2. 精选高清实拍词库 (经过人工语义核实的具象实词)
   if (CURATED_REAL_PHOTOS[cleanWord]) {
     const url = CURATED_REAL_PHOTOS[cleanWord];
-    saveWordImage(cleanWord, url);
     return url;
   }
 
-  // 3. 动态从维基媒体真实实拍图库获取
-  try {
-    const apiUrl = `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(
-      cleanWord
-    )}&prop=pageimages&format=json&pithumbsize=640&origin=*`;
-
-    const res = await fetch(apiUrl, { cache: 'force-cache' });
-    if (res.ok) {
-      const data = await res.json();
-      const pages = data?.query?.pages;
-      if (pages) {
-        for (const pageId in pages) {
-          const thumb = pages[pageId]?.thumbnail?.source;
-          if (thumb && typeof thumb === 'string') {
-            saveWordImage(cleanWord, thumb);
-            return thumb;
-          }
-        }
-      }
-    }
-  } catch (err) {
-    // 允许网络异常或被阻挡，自然降级至兜底场景
-    console.debug('Wikipedia image lookup failed gracefully:', err);
-  }
-
+  // 3. 其它抽象词或无真实匹配实拍的单词一律返回 null，优雅展示语义场景卡，优先凸显课本真实例句
   return null;
 }

@@ -1,129 +1,131 @@
 /**
- * Theme and Custom Background definitions
+ * Theme, Appearance, and Background Presets for RanCi App
  */
+
+export interface BaseColorPreset {
+  id: string;
+  name: string;
+  color: string;
+  isDark?: boolean;
+}
+
+export interface GradientPreset {
+  id: string;
+  name: string;
+  gradient: string;
+  isDark?: boolean;
+}
 
 export interface ThemeConfig {
   id: string;
   name: string;
+  type: 'sunshine' | 'base_color' | 'gradient' | 'custom_image';
   pageBg: string;
   cardBg: string;
   textColor: string;
   subtextColor: string;
-  accentColor: string;
-  accentText: string;
-  buttonPositiveBg: string;
-  buttonPositiveText: string;
-  buttonNegativeBg: string;
-  buttonNegativeText: string;
   borderColor: string;
-  bgImageUrl?: string;
-  overlayOpacity: number; // 0 - 100 (%)
-  overlayBlur: number; // 0 - 20 (px)
   isDark?: boolean;
+  bgImageUrl?: string;
+  overlayOpacity: number; // 0 - 80 (%) mask
+  accentColor?: string;
+  accentText?: string;
+  buttonPositiveBg?: string;
+  buttonPositiveText?: string;
+  buttonNegativeBg?: string;
+  buttonNegativeText?: string;
 }
 
+// ① 基础色：8 个圆形色块 (低饱和浅色 + 深蓝护眼)
+export const BASE_COLOR_PRESETS: BaseColorPreset[] = [
+  { id: 'base_white', name: '白', color: '#FFFFFF' },
+  { id: 'base_mint_white', name: '薄荷白', color: '#F3FAF6' },
+  { id: 'base_sky_white', name: '天蓝白', color: '#F0F6FC' },
+  { id: 'base_warm_apricot', name: '暖杏', color: '#FCF8F2' },
+  { id: 'base_lavender', name: '淡紫', color: '#F7F3FB' },
+  { id: 'base_sakura_pink', name: '樱粉', color: '#FAF2F5' },
+  { id: 'base_cyan_green', name: '青绿', color: '#EDF8F4' },
+  { id: 'base_deep_blue', name: '深蓝 (护眼)', color: '#131B26', isDark: true },
+];
+
+// ② 预设渐变：8 个方形预览 (2 行 × 4 个)
+export const GRADIENT_PRESETS: GradientPreset[] = [
+  { id: 'grad_dawn', name: '晨光', gradient: 'linear-gradient(135deg, #FFF7EB 0%, #FFE8D6 100%)' },
+  { id: 'grad_mint', name: '薄荷', gradient: 'linear-gradient(135deg, #E8F8F1 0%, #D4F2E4 100%)' },
+  { id: 'grad_grapefruit', name: '蜜柚', gradient: 'linear-gradient(135deg, #FFF2E8 0%, #FEE0CE 100%)' },
+  { id: 'grad_lavender', name: '薰衣', gradient: 'linear-gradient(135deg, #F4EEFC 0%, #E8DCF9 100%)' },
+  { id: 'grad_sea_salt', name: '海盐', gradient: 'linear-gradient(135deg, #EBF5FC 0%, #D8ECF9 100%)' },
+  { id: 'grad_sakura', name: '樱花', gradient: 'linear-gradient(135deg, #FDF0F4 0%, #FBDDE7 100%)' },
+  { id: 'grad_night_flight', name: '夜航', gradient: 'linear-gradient(135deg, #182230 0%, #0F1622 100%)', isDark: true },
+  { id: 'grad_starry_night', name: '星夜', gradient: 'linear-gradient(135deg, #141525 0%, #0C0D17 100%)', isDark: true },
+];
+
+// 默认阳光风主题
+export const DEFAULT_SUNSHINE_THEME: ThemeConfig = {
+  id: 'sunshine_default',
+  name: '清爽阳光风',
+  type: 'sunshine',
+  pageBg: 'linear-gradient(160deg, #F7FBFF 0%, #F4F9F7 50%, #FDF9F4 100%)',
+  cardBg: '#FFFFFF',
+  textColor: '#2C3E46',
+  subtextColor: '#768B94',
+  borderColor: '#E6EEF1',
+  overlayOpacity: 40,
+  isDark: false,
+};
+
 export const THEME_PRESETS: ThemeConfig[] = [
+  DEFAULT_SUNSHINE_THEME,
   {
-    id: 'eye_care_beige',
-    name: '护眼米色 (默认)',
-    pageBg: '#FFFDF8',
+    id: 'base_mint_white',
+    name: '薄荷白',
+    type: 'base_color',
+    pageBg: '#F3FAF6',
     cardBg: '#FFFFFF',
-    textColor: '#2C2C2C',
-    subtextColor: '#666666',
-    accentColor: '#2C2C2C',
-    accentText: '#FFFFFF',
-    buttonPositiveBg: '#D7E8DD',
-    buttonPositiveText: '#234E35',
-    buttonNegativeBg: '#F7E2E2',
-    buttonNegativeText: '#7A2828',
-    borderColor: '#EAE6DD',
-    overlayOpacity: 75,
-    overlayBlur: 4,
+    textColor: '#2C3E46',
+    subtextColor: '#768B94',
+    borderColor: '#E6EEF1',
+    overlayOpacity: 40,
+    isDark: false,
   },
   {
-    id: 'fresh_grassland',
-    name: '清新草原绿',
-    pageBg: '#F3F9F4',
-    cardBg: '#FFFFFF',
-    textColor: '#1A3324',
-    subtextColor: '#4B6B57',
-    accentColor: '#2A6F4A',
-    accentText: '#FFFFFF',
-    buttonPositiveBg: '#CDEFD6',
-    buttonPositiveText: '#18542B',
-    buttonNegativeBg: '#FCE0E0',
-    buttonNegativeText: '#822727',
-    borderColor: '#D4E8DA',
-    overlayOpacity: 75,
-    overlayBlur: 4,
-  },
-  {
-    id: 'sky_blue',
-    name: '天空蓝',
+    id: 'base_sky_white',
+    name: '天蓝白',
+    type: 'base_color',
     pageBg: '#F0F6FC',
     cardBg: '#FFFFFF',
-    textColor: '#162C42',
-    subtextColor: '#4E6A85',
-    accentColor: '#20639B',
-    accentText: '#FFFFFF',
-    buttonPositiveBg: '#D2EDF8',
-    buttonPositiveText: '#134D66',
-    buttonNegativeBg: '#FCE0E4',
-    buttonNegativeText: '#872332',
-    borderColor: '#D2E3F3',
-    overlayOpacity: 75,
-    overlayBlur: 4,
+    textColor: '#2C3E46',
+    subtextColor: '#768B94',
+    borderColor: '#E6EEF1',
+    overlayOpacity: 40,
+    isDark: false,
   },
   {
-    id: 'sakura_pink',
-    name: '樱花粉',
-    pageBg: '#FFF5F7',
+    id: 'base_warm_apricot',
+    name: '暖杏',
+    type: 'base_color',
+    pageBg: '#FCF8F2',
     cardBg: '#FFFFFF',
-    textColor: '#3D1C24',
-    subtextColor: '#7A4D57',
-    accentColor: '#8E384D',
-    accentText: '#FFFFFF',
-    buttonPositiveBg: '#DFF1E4',
-    buttonPositiveText: '#235934',
-    buttonNegativeBg: '#FCD8DF',
-    buttonNegativeText: '#842639',
-    borderColor: '#F5D7DF',
-    overlayOpacity: 75,
-    overlayBlur: 4,
+    textColor: '#2C3E46',
+    subtextColor: '#768B94',
+    borderColor: '#E6EEF1',
+    overlayOpacity: 40,
+    isDark: false,
   },
   {
-    id: 'minimal_monochrome',
-    name: '简约灰白',
-    pageBg: '#F7F7F8',
-    cardBg: '#FFFFFF',
-    textColor: '#1E1E20',
-    subtextColor: '#5E5E66',
-    accentColor: '#1E1E20',
-    accentText: '#FFFFFF',
-    buttonPositiveBg: '#E2EBE4',
-    buttonPositiveText: '#264D32',
-    buttonNegativeBg: '#F3DFDF',
-    buttonNegativeText: '#6B2B2B',
-    borderColor: '#E2E2E6',
-    overlayOpacity: 75,
-    overlayBlur: 4,
-  },
-  {
-    id: 'dark_night',
-    name: '深色夜间模式',
-    pageBg: '#18181A',
-    cardBg: '#242428',
-    textColor: '#EEEEEE',
-    subtextColor: '#A0A0AA',
-    accentColor: '#E0E0E6',
-    accentText: '#18181A',
-    buttonPositiveBg: '#214D32',
-    buttonPositiveText: '#A1E6B8',
-    buttonNegativeBg: '#592025',
-    buttonNegativeText: '#F7B0B5',
-    borderColor: '#383840',
-    overlayOpacity: 85,
-    overlayBlur: 6,
+    id: 'base_deep_blue',
+    name: '暗蓝 (护眼)',
+    type: 'base_color',
+    pageBg: '#131B26',
+    cardBg: '#1C2633',
+    textColor: '#F0F4F8',
+    subtextColor: '#98AAB3',
+    borderColor: '#2C3847',
+    overlayOpacity: 40,
     isDark: true,
   },
 ];
+
+export function getDefaultTheme(): ThemeConfig {
+  return { ...DEFAULT_SUNSHINE_THEME };
+}

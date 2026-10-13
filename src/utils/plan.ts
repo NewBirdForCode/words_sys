@@ -480,40 +480,56 @@ export function batchSyncWordLearningResults(
  * 计算词库学习进度 (用于词库管理弹窗与首页计划卡片)
  */
 export function computeWordbookProgress(wordbookId: string): WordbookPlanProgress {
-  const wb = getWordbookById(wordbookId) || getDefaultWordbook();
-  const allProgress = getAllMemoryProgress();
-  const totalWords = wb.words.length;
-  const dailyNewWords = getWordbookDailyNewWords(wordbookId);
+  try {
+    const wb = getWordbookById(wordbookId) || getDefaultWordbook();
+    const allProgress = getAllMemoryProgress();
+    const wordsList = Array.isArray(wb?.words) ? wb.words : [];
+    const totalWords = wordsList.length;
+    const dailyNewWords = getWordbookDailyNewWords(wordbookId);
 
-  let learnedWords = 0;
-  let graduatedWords = 0;
+    let learnedWords = 0;
+    let graduatedWords = 0;
 
-  wb.words.forEach(w => {
-    const key = getWordKey(wordbookId, w.id);
-    const prog = allProgress[key];
-    if (prog && prog.firstLearnedDate) {
-      learnedWords++;
-      if (prog.isGraduated || prog.isManuallyMastered) {
-        graduatedWords++;
+    wordsList.forEach(w => {
+      if (!w || !w.id) return;
+      const key = getWordKey(wordbookId, w.id);
+      const prog = allProgress[key];
+      if (prog && prog.firstLearnedDate) {
+        learnedWords++;
+        if (prog.isGraduated || prog.isManuallyMastered) {
+          graduatedWords++;
+        }
       }
-    }
-  });
+    });
 
-  const remainingNewWords = Math.max(0, totalWords - learnedWords);
-  const estimatedDaysLeft = Math.ceil(remainingNewWords / Math.max(1, dailyNewWords));
-  const progressPercent = totalWords > 0 ? Math.round((learnedWords / totalWords) * 100) : 0;
-  const isFullyLearned = remainingNewWords === 0;
+    const remainingNewWords = Math.max(0, totalWords - learnedWords);
+    const estimatedDaysLeft = Math.ceil(remainingNewWords / Math.max(1, dailyNewWords));
+    const progressPercent = totalWords > 0 ? Math.round((learnedWords / totalWords) * 100) : 0;
+    const isFullyLearned = remainingNewWords === 0;
 
-  return {
-    wordbookId,
-    totalWords,
-    learnedWords,
-    remainingNewWords,
-    graduatedWords,
-    estimatedDaysLeft,
-    progressPercent,
-    isFullyLearned,
-  };
+    return {
+      wordbookId,
+      totalWords,
+      learnedWords,
+      remainingNewWords,
+      graduatedWords,
+      estimatedDaysLeft,
+      progressPercent,
+      isFullyLearned,
+    };
+  } catch (err) {
+    console.error('computeWordbookProgress failed:', err);
+    return {
+      wordbookId,
+      totalWords: 0,
+      learnedWords: 0,
+      remainingNewWords: 0,
+      graduatedWords: 0,
+      estimatedDaysLeft: 0,
+      progressPercent: 0,
+      isFullyLearned: false,
+    };
+  }
 }
 
 /**

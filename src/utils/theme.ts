@@ -1,9 +1,10 @@
-import { ThemeConfig, THEME_PRESETS } from '../types/theme';
+import { ThemeConfig, DEFAULT_SUNSHINE_THEME } from '../types/theme';
+import { getCustomBackgroundFromDB } from './backgroundStorage';
 
-const STORAGE_KEY_THEME = 'daily30_theme_settings_v2';
+const STORAGE_KEY_THEME = 'daily30_theme_settings_v3';
 
 export function getDefaultTheme(): ThemeConfig {
-  return THEME_PRESETS[0];
+  return { ...DEFAULT_SUNSHINE_THEME };
 }
 
 export function loadSavedTheme(): ThemeConfig {
@@ -41,19 +42,18 @@ export function resetTheme(): ThemeConfig {
 export function applyThemeToDOM(theme: ThemeConfig): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
-  
+
+  if (theme.isDark) {
+    root.classList.add('dark');
+  } else {
+    root.classList.remove('dark');
+  }
+
   root.style.setProperty('--app-page-bg', theme.pageBg);
   root.style.setProperty('--app-card-bg', theme.cardBg);
   root.style.setProperty('--app-text', theme.textColor);
   root.style.setProperty('--app-subtext', theme.subtextColor);
-  root.style.setProperty('--app-accent', theme.accentColor);
-  root.style.setProperty('--app-accent-text', theme.accentText);
   root.style.setProperty('--app-border', theme.borderColor);
-  root.style.setProperty('--app-btn-pos-bg', theme.buttonPositiveBg);
-  root.style.setProperty('--app-btn-pos-text', theme.buttonPositiveText);
-  root.style.setProperty('--app-btn-neg-bg', theme.buttonNegativeBg);
-  root.style.setProperty('--app-btn-neg-text', theme.buttonNegativeText);
-  
-  document.body.style.backgroundColor = theme.pageBg;
+
   document.body.style.color = theme.textColor;
 }

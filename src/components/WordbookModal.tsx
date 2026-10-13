@@ -111,7 +111,7 @@ export const WordbookModal: React.FC<WordbookModalProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load wordbooks on open
+  // Load wordbooks on open & handle keyboard shortcuts
   React.useEffect(() => {
     if (isOpen) {
       const all = getAllWordbooks();
@@ -126,8 +126,18 @@ export const WordbookModal: React.FC<WordbookModalProps> = ({
       setManualExample('');
       setManualPhonetic('');
       setCopiedFeedback(null);
+
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          onClose();
+        }
+      };
+      window.addEventListener('keydown', handleKeyDown);
+      return () => {
+        window.removeEventListener('keydown', handleKeyDown);
+      };
     }
-  }, [isOpen]);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -324,8 +334,16 @@ export const WordbookModal: React.FC<WordbookModalProps> = ({
   }, [filteredSystemWordbooks]);
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#2C2C2C]/40 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-fadeIn">
-      <div className="bg-[#FFFDF8] rounded-2xl max-w-2xl w-full max-h-[90vh] shadow-2xl border border-[#EAE6DD] flex flex-col overflow-hidden animate-scaleIn relative">
+    <div
+      data-testid="modal-wordbook-backdrop"
+      onClick={onClose}
+      className="fixed inset-0 z-[70] bg-[#2C2C2C]/50 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-fadeIn"
+    >
+      <div
+        data-testid="modal-wordbook-container"
+        onClick={e => e.stopPropagation()}
+        className="bg-[#FFFDF8] rounded-2xl max-w-2xl w-full max-h-[90vh] shadow-2xl border border-[#EAE6DD] flex flex-col overflow-hidden animate-scaleIn relative"
+      >
         {/* 操作反馈轻提示 */}
         {copiedFeedback && (
           <div className="absolute top-4 left-1/2 -translate-x-1/2 z-60 px-4 py-2 bg-emerald-800 text-white text-xs font-bold rounded-xl shadow-lg flex items-center gap-2 animate-scaleIn">

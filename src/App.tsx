@@ -45,17 +45,20 @@ import { initSpeechSynthesis } from './utils/speech';
 import { loadSavedTheme, saveTheme, applyThemeToDOM } from './utils/theme';
 import { calculateStreakDays, CheckInRecord } from './utils/checkin';
 import { ThemeConfig } from './types/theme';
-import { Navbar } from './components/Navbar';
+import { Sidebar } from './components/Sidebar';
 import { WordReviewGrid } from './components/WordReviewGrid';
 import { NoticeBanner } from './components/NoticeBanner';
 import { HistoryDrawer } from './components/HistoryDrawer';
 import { WordbookModal } from './components/WordbookModal';
 import { Stage1Shadowing } from './components/Stage1Shadowing';
 import { Stage3Spelling } from './components/Stage3Spelling';
-import { Stage4MistakeLoop } from './components/Stage4MistakeLoop';
+import { Stage4MatchGame } from './components/Stage4MatchGame';
+import { AppearanceModal } from './components/AppearanceModal';
+import { MemoryStatsPanel } from './components/MemoryStatsPanel';
 import { CheckInModal } from './components/CheckInModal';
 import { SettingsDrawer } from './components/SettingsDrawer';
 import { PlanCalculatorModal } from './components/PlanCalculatorModal';
+import { getCustomBackgroundFromDB } from './utils/backgroundStorage';
 import {
   DailyTaskPool,
   getOrGenerateDailyTaskPool,
@@ -69,8 +72,9 @@ import { Wordbook, LearningMode } from './types';
 export default function App() {
   const [learningDate, setLearningDate] = useState<string>(getTodayDateString());
 
-  // 四阶段学习流程：默认每次进入从【阶段一】开始
-  const [appStage, setAppStage] = useState<AppStage>('stage1_shadowing');
+  // 四阶段学习流程 + 统计页：默认每次进入从【阶段一】开始
+  const [appStage, setAppStage] = useState<AppStage | 'stats'>('stage1_shadowing');
+  const [isAppearanceModalOpen, setIsAppearanceModalOpen] = useState<boolean>(false);
 
   // 当前词库
   const [activeWbId, setActiveWbId] = useState<string>(getActiveWordbookId());
@@ -238,6 +242,20 @@ export default function App() {
   const handleStage2Known = (wordId: string) => {
     setStage2Selections(prev => ({ ...prev, [wordId]: 'known' }));
     updateWordLearningResult(activeWbId, wordId, true, learningDate);
+    appendReviewLogs([
+      {
+        id: `log_stage2_${Date.now()}_${wordId}`,
+        user_id: getUserId(),
+        word_id: wordId,
+        wordbook_id: activeWbId,
+        session_id: `sess_stage2_${learningDate}`,
+        round_id: 1,
+        review_stage: 'stage1_new_words',
+        result: 'known',
+        timestamp: Date.now(),
+        learning_date: learningDate,
+      },
+    ]);
     setNotice(null);
   };
 
@@ -248,6 +266,20 @@ export default function App() {
     recordMistake(wordId);
     // 更新抗遗忘记忆：错误次数+1，复习节点重置为明天(D+1)
     updateWordLearningResult(activeWbId, wordId, false, learningDate);
+    appendReviewLogs([
+      {
+        id: `log_stage2_${Date.now()}_${wordId}_wrong`,
+        user_id: getUserId(),
+        word_id: wordId,
+        wordbook_id: activeWbId,
+        session_id: `sess_stage2_${learningDate}`,
+        round_id: 1,
+        review_stage: 'stage1_new_words',
+        result: 'wrong',
+        timestamp: Date.now(),
+        learning_date: learningDate,
+      },
+    ]);
     setMistakeVersion(v => v + 1);
     setNotice(null);
   };
@@ -460,54 +492,70 @@ export default function App() {
 
   return (
     <div
-      className="min-h-screen flex flex-col font-sans relative transition-colors duration-200"
+      className={`min-h-screen flex font-sans relative transition-colors duration-200 ${
+        currentTheme.isDark ? 'dark text-neutral-100' : 'text-[#2C3E46]'
+      }`}
       style={{
-        backgroundColor: currentTheme.pageBg,
-        color: currentTheme.textColor,
+        background: currentTheme.pageBg,
       }}
     >
       <div ref={topAnchorRef} />
 
-      {/* Wallpaper background image if configured */}
-      {currentTheme.bgImageUrl && (
-        <div
-          className="fixed inset-0 pointer-events-none z-0 bg-cover bg-center transition-all duration-300"
-          style={{
-            backgroundImage: `url(${currentTheme.bgImageUrl})`,
-            filter: currentTheme.overlayBlur ? `blur(${currentTheme.overlayBlur}px)` : undefined,
-            transform: currentTheme.overlayBlur ? 'scale(1.05)' : undefined,
-          }}
-        />
-      )}
-      {currentTheme.bgImageUrl && (
-        <div
-          className="fixed inset-0 pointer-events-none z-0 transition-opacity duration-300"
-          style={{
-            backgroundColor: currentTheme.pageBg,
-            opacity: currentTheme.overlayOpacity / 100,
-          }}
-        />
+      {/* 阳光风三团柔和光晕 (当非深色模式且非自定义图片时渲染) */}
+      {!currentTheme.isDark && currentTheme.type !== 'custom_image' && (
+        <div className="sunshine-halos">
+          <div className="sunshine-halo-blue" />
+        </div>
       )}
 
-      {/* 顶部导航与四阶段切换标签 */}
-      <Navbar
-        currentStage={appStage}
-        onStageChange={stage => {
-          setAppStage(stage);
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
-        activeWordbookName={activeWordbook.name}
-        onOpenWordbooks={() => setIsWordbookModalOpen(true)}
-        onOpenHistory={() => setIsHistoryOpen(true)}
-        onOpenSettings={() => setIsSettingsOpen(true)}
-        mistakeCount={currentMistakes.length}
-        currentTheme={currentTheme}
-        currentMode={currentMode}
-        onToggleMode={() => handleSwitchMode(currentMode === 'fast_review' ? 'focused_quiz' : 'fast_review')}
-      />
+      {/* 自定义壁纸层 (如果配置了图片) */}
+      {currentTheme.bgImageUrl && (
+        <>
+          <div
+            className="fixed inset-0 pointer-events-none z-0 bg-cover bg-center transition-all duration-300"
+            style={{
+              backgroundImage: `url(${currentTheme.bgImageUrl})`,
+            }}
+          />
+          <div
+            className="fixed inset-0 pointer-events-none z-0 transition-opacity duration-300"
+            style={{
+              backgroundColor: currentTheme.isDark ? '#000000' : '#FFFFFF',
+              opacity: (currentTheme.overlayOpacity || 40) / 100,
+            }}
+          />
+        </>
+      )}
 
-      {/* 主操作内容区 (精简为纯粹三行动线：阶段Tab已在Navbar，此处为主学习内容卡与底部进度条) */}
-      <main className="flex-1 max-w-xl w-full mx-auto px-4 py-3 flex flex-col justify-between gap-4 relative z-10 min-h-[calc(100vh-130px)]">
+      {/* 左侧固定侧栏 (宽 150px，白底圆角卡片，带淡阴影) */}
+      <div className="p-3 shrink-0 z-30">
+        <Sidebar
+          currentStage={appStage}
+          onStageChange={stage => {
+            setAppStage(stage);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          mistakeCount={currentMistakes.length}
+          onOpenWordbooks={() => setIsWordbookModalOpen(true)}
+          onOpenAppearance={() => setIsAppearanceModalOpen(true)}
+          onOpenCheckIn={() => {
+            setCheckInPhotoUrl(null);
+            setIsCheckInModalOpen(true);
+          }}
+          autoSpeak={autoSpeakOnReveal}
+          onToggleAutoSpeak={() => {
+            const nextVal = !autoSpeakOnReveal;
+            setAutoSpeakOnReveal(nextVal);
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('daily30_auto_speak_v1', String(nextVal));
+            }
+          }}
+          isDark={currentTheme.isDark}
+        />
+      </div>
+
+      {/* 右侧全屏内容区 (内容区最大化，从顶到底自适应) */}
+      <main className="flex-1 min-w-0 px-4 sm:px-8 py-3 flex flex-col justify-between gap-4 relative z-10 min-h-screen">
         {/* 通知提示条 */}
         {notice && (
           <NoticeBanner
@@ -518,28 +566,28 @@ export default function App() {
         )}
 
         {/* 空词库友好引导卡片 */}
-        {todayWords.length === 0 && appStage !== 'stage4_mistake_loop' && (
-          <div className="bg-white rounded-[16px] border border-[#EAE6DD] p-8 sm:p-10 text-center max-w-lg mx-auto shadow-xs my-auto animate-fadeIn">
+        {todayWords.length === 0 && appStage !== 'stage4_mistake_loop' && appStage !== 'stats' && (
+          <div className="sunshine-card p-8 sm:p-10 text-center max-w-lg mx-auto shadow-xs my-auto animate-fadeIn">
             <div className="w-14 h-14 rounded-full bg-[#FAF3E8] text-[#2C2C2C] flex items-center justify-center mx-auto mb-3">
               <BookOpen className="w-7 h-7" />
             </div>
-            <h3 className="text-xl font-serif font-bold text-[#2C2C2C] mb-2">当前词库暂无词汇</h3>
+            <h3 className="text-xl font-serif-en font-bold text-[#2C2C2C] mb-2">当前词库暂无词汇</h3>
             <p className="text-xs sm:text-sm text-[#666666] mb-6">
               词库可能为空或尚未导入单词。请点击下方按钮切换预置词库或上传自定义词表。
             </p>
             <button
               type="button"
               onClick={() => setIsWordbookModalOpen(true)}
-              className="px-6 py-2.5 bg-[#2C2C2C] text-white font-bold rounded-xl text-sm transition-all shadow-xs cursor-pointer hover:bg-[#1A1A1A]"
+              className="px-6 py-2.5 bg-acc-grad text-white font-bold rounded-xl text-sm transition-all shadow-xs cursor-pointer"
             >
               管理 / 切换词库
             </button>
           </div>
         )}
 
-        {/* ----------------- 【第 2 行：当前内容卡 (占屏 70% 视觉焦点)】 ----------------- */}
-        <div className="flex-1 flex flex-col justify-center my-auto">
-          {/* 阶段一 | 看图选义 / 精选刷词 (支持今日精选30词与快速刷200词模式) */}
+        {/* ----------------- 【当前内容卡】 ----------------- */}
+        <div className="flex-1 flex flex-col justify-center my-auto w-full">
+          {/* 阶段一 | 精选刷词 */}
           {appStage === 'stage1_shadowing' && todayWords.length > 0 && (
             <Stage1Shadowing
               words={todayWords}
@@ -566,7 +614,7 @@ export default function App() {
             />
           )}
 
-          {/* 阶段二 | 自测批改 (一屏一词，答完自动切词，双圆形52px对错按钮) */}
+          {/* 阶段二 | 自测批改 */}
           {appStage === 'stage2_self_test' && todayWords.length > 0 && (
             <WordReviewGrid
               words={todayWords}
@@ -590,11 +638,13 @@ export default function App() {
             />
           )}
 
-          {/* 阶段三 | 拼写默写 (无独立输入框，字母格子即输入区，2行QWERTY键盘) */}
+          {/* 阶段三 | 拼写默写 */}
           {appStage === 'stage3_spelling' && todayWords.length > 0 && (
             <Stage3Spelling
               words={todayWords}
               activeWordbookId={activeWbId}
+              dailyTaskPool={dailyTaskPool}
+              totalMistakesCount={currentMistakes.length}
               onFinishStage3={() => {
                 setMistakeVersion(v => v + 1);
                 setAppStage('stage4_mistake_loop');
@@ -614,58 +664,37 @@ export default function App() {
             />
           )}
 
-          {/* 阶段四 | 错误循环 (一屏一词，双圆形52px消除按钮，错题清零闭环) */}
+          {/* 阶段四 | 连线消消乐 (全新) */}
           {(appStage === 'stage4_mistake_loop' || (appStage as string) === 'stage3_mistake_loop') && (
-            <Stage4MistakeLoop
+            <Stage4MatchGame
               allWordsMap={allWordsMap}
               initialMistakes={currentMistakes}
+              fallbackWords={todayWords}
+              activeWordbookId={activeWbId}
               onFinishStage4={() => {
                 setMistakeVersion(v => v + 1);
                 setAppStage('stage1_shadowing');
                 setNotice({
                   type: 'success',
-                  message: '🎉 恭喜！四阶段错题已全部清零，今日抗遗忘任务圆满达成！',
+                  message: '🎉 恭喜！连线消消乐已全部消除通关，错题清零！',
                 });
                 window.scrollTo({ top: 0, behavior: 'smooth' });
               }}
               onSpeechError={msg => setNotice({ type: 'warning', message: msg })}
-              autoSpeakOnReveal={autoSpeakOnReveal}
+              isDark={currentTheme.isDark}
+            />
+          )}
+
+          {/* 统计面板 */}
+          {appStage === 'stats' && (
+            <MemoryStatsPanel
+              activeWordbookId={activeWbId}
+              onNavigateToStage1={() => setAppStage('stage1_shadowing')}
+              onWordMasteryChanged={() => setMistakeVersion(v => v + 1)}
               currentTheme={currentTheme}
-              onOpenPunchIn={() => {
-                setCheckInPhotoUrl(null);
-                setIsCheckInModalOpen(true);
-              }}
             />
           )}
         </div>
-
-        {/* ----------------- 【第 3 行：进度条 + 同行小字】(阶段一精选刷词已在顶部固定栏展示进度，移除底部重复页脚) ----------------- */}
-        {appStage !== 'stage1_shadowing' && (
-          <div className="w-[82%] sm:w-[78%] max-w-[420px] mx-auto py-2 flex flex-col gap-1.5 text-xs select-none">
-            <div className="flex items-center justify-between text-[#777777] font-medium">
-              <span className="font-mono text-[11px] sm:text-xs">
-                今日 {dailyTaskPool?.newWords.length || 0} 词 · 复习 {dailyTaskPool?.reviewWords.length || 0} 词
-              </span>
-              <span className="text-[11px] text-[#888888]">
-                {appStage === 'stage2_self_test' && '阶段二: 自测批改'}
-                {appStage === 'stage3_spelling' && '阶段三: 拼写默写'}
-                {appStage === 'stage4_mistake_loop' && '阶段四: 错题循环'}
-              </span>
-            </div>
-
-            <div className="w-full bg-[#EAE6DD] h-1.5 rounded-full overflow-hidden">
-              <div
-                className="bg-emerald-600 h-full rounded-full transition-all duration-300 ease-out"
-                style={{
-                  width: `${
-                    appStage === 'stage2_self_test' ? '33%' :
-                    appStage === 'stage3_spelling' ? '66%' : '100%'
-                  }`,
-                }}
-              />
-            </div>
-          </div>
-        )}
       </main>
 
       {/* 每日学习打卡海报弹窗 */}
@@ -762,6 +791,17 @@ export default function App() {
           setStage2Completed(false);
           setMistakeVersion(v => v + 1);
           setAppStage('stage1_shadowing');
+        }}
+      />
+
+      {/* 背景与外观弹窗 */}
+      <AppearanceModal
+        isOpen={isAppearanceModalOpen}
+        onClose={() => setIsAppearanceModalOpen(false)}
+        currentTheme={currentTheme}
+        onSaveTheme={newTheme => {
+          setCurrentTheme(newTheme);
+          saveTheme(newTheme);
         }}
       />
     </div>

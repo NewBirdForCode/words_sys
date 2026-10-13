@@ -5,7 +5,7 @@ const STORAGE_KEY_ACTIVE_SESSION = 'daily30_active_session_v1';
 const STORAGE_KEY_USER_ID = 'daily30_user_id_v1';
 const STORAGE_KEY_MISTAKES = 'daily30_mistake_book_v2';
 
-// 错题本持久化操作 (阶段三：高频错误循环使用)
+// 错题本持久化操作 (阶段四：高频错误循环使用，持续追踪不物理删除)
 export function getMistakeBook(): Record<string, MistakeItem> {
   if (typeof window === 'undefined') return {};
   try {
@@ -23,33 +23,109 @@ export function saveMistakeBook(book: Record<string, MistakeItem>): void {
   localStorage.setItem(STORAGE_KEY_MISTAKES, JSON.stringify(book));
 }
 
+/**
+ * 记录错词：新增或累计错误次数，重置连续掌握状态，进入待复习队列
+ */
 export function recordMistake(wordId: string): void {
   const book = getMistakeBook();
-  const current = book[wordId] || { wordId, errorCount: 0, lastWrongAt: Date.now() };
+  const current = book[wordId] || {
+    wordId,
+    errorCount: 0,
+    consecutiveCorrect: 0,
+    lastWrongAt: Date.now(),
+  };
   book[wordId] = {
     wordId,
-    errorCount: current.errorCount + 1,
+    errorCount: (current.errorCount || 0) + 1,
+    consecutiveCorrect: 0,
     lastWrongAt: Date.now(),
+    lastReviewedAt: current.lastReviewedAt,
+    isResolvedInCurrentSession: false,
+    resolvedAt: null,
   };
   saveMistakeBook(book);
 }
 
+/**
+ * 攻克当前轮次错词：标记本轮消除，增加连续正确计数，但永久保留历史错误统计与追踪
+ */
+export function resolveMistakeInSession(wordId: string): void {
+  const book = getMistakeBook();
+  const current = book[wordId];
+  if (current) {
+    book[wordId] = {
+      ...current,
+      consecutiveCorrect: (current.consecutiveCorrect || 0) + 1,
+      lastReviewedAt: Date.now(),
+      isResolvedInCurrentSession: true,
+      resolvedAt: Date.now(),
+    };
+    saveMistakeBook(book);
+  }
+}
+
+/**
+ * 用户手动从错题本彻底移出 (仅限用户在设置或历史抽屉主动点击清空)
+ */
 export function removeMistake(wordId: string): void {
   const book = getMistakeBook();
   delete book[wordId];
   saveMistakeBook(book);
 }
 
+/**
+ * 获取当前需要复习的活跃错词列表 (优先排列错误次数多、未攻克的薄弱词)
+ */
 export function getMistakesSorted(): MistakeItem[] {
+  const book = getMistakeBook();
+  return Object.values(book)
+    .filter(item => item.errorCount >= 1 && !item.isResolvedInCurrentSession)
+    .sort((a, b) => {
+      // 1. 错误次数越多的排越前 (反复错误的词提高复习优先级)
+      if (b.errorCount !== a.errorCount) {
+        return b.errorCount - a.errorCount;
+      }
+      // 2. 连续正确次数少的排前
+      const correctA = a.consecutiveCorrect || 0;
+      const correctB = b.consecutiveCorrect || 0;
+      if (correctA !== correctB) {
+        return correctA - correctB;
+      }
+      // 3. 最近做错的排前
+      return b.lastWrongAt - a.lastWrongAt;
+    });
+}
+
+/**
+ * 获取全部历史错题档案 (包含已在当前轮次攻克的词，用于历史分析与持久度追踪)
+ */
+export function getAllMistakeHistory(): MistakeItem[] {
   const book = getMistakeBook();
   return Object.values(book)
     .filter(item => item.errorCount >= 1)
     .sort((a, b) => {
       if (b.errorCount !== a.errorCount) {
-        return b.errorCount - a.errorCount; // 错误次数越多的排越前
+        return b.errorCount - a.errorCount;
       }
       return b.lastWrongAt - a.lastWrongAt;
     });
+}
+
+/**
+ * 重置所有错词的本轮攻克标记 (开始新的一天学习或再次强化时调用)
+ */
+export function resetSessionMistakeFlags(): void {
+  const book = getMistakeBook();
+  let modified = false;
+  Object.values(book).forEach(item => {
+    if (item.isResolvedInCurrentSession) {
+      item.isResolvedInCurrentSession = false;
+      modified = true;
+    }
+  });
+  if (modified) {
+    saveMistakeBook(book);
+  }
 }
 
 // Get or generate persistent User ID

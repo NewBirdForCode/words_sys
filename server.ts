@@ -1,16 +1,14 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
-import { fileURLToPath, pathToFileURL } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI, Type } from '@google/genai';
 import { CURATED_SCENARIOS_BANK } from './src/data/curatedScenarios';
 
 dotenv.config();
 
-// Electron 的 esbuild CJS 包中 import.meta.url 可能为空，回退到进程工作目录。
-const __filename = fileURLToPath(import.meta.url || pathToFileURL(process.cwd()).href);
-const __dirname = path.dirname(__filename);
+// Electron 的 esbuild CJS 包中 import.meta.url 不可用，桌面主进程会将工作目录设为 resourcesPath。
+const __dirname = process.cwd();
 
 const app = express();
 app.use(express.json());

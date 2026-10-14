@@ -43,7 +43,7 @@ class ClassMemberAdd(BaseModel):
     student_id: int
 
 class JoinClassroomRequest(BaseModel):
-    invite_code: str = Field(min_length=4, max_length=16)
+    invite_code: str = Field(pattern=r"^\d{8}$", description="8 位数字班级邀请码")
 
 class WordInput(BaseModel):
     external_id: str | None = None; word: str = Field(min_length=1, max_length=160)

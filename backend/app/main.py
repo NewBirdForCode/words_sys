@@ -77,9 +77,10 @@ def on_startup() -> None:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE classrooms ADD COLUMN invite_code VARCHAR(16) NOT NULL DEFAULT ''"))
     with Session(bind=engine) as db:
-        classrooms = db.scalars(select(Classroom).where(Classroom.invite_code == "")).all()
+        classrooms = db.scalars(select(Classroom)).all()
         for classroom in classrooms:
-            classroom.invite_code = generate_invite_code(db)
+            if len(classroom.invite_code or "") != 8 or not classroom.invite_code.isdigit():
+                classroom.invite_code = generate_invite_code(db)
         db.commit()
 
 
@@ -87,9 +88,8 @@ def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 def generate_invite_code(db: Session) -> str:
-    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     while True:
-        code = "".join(secrets.choice(alphabet) for _ in range(8))
+        code = f"{secrets.randbelow(100_000_000):08d}"
         if not db.scalar(select(Classroom.id).where(Classroom.invite_code == code)):
             return code
 
@@ -263,7 +263,7 @@ def list_classes(user: CurrentUser, db: Annotated[Session, Depends(get_db)]) -> 
 def join_class(payload: JoinClassroomRequest, student: CurrentUser, db: Annotated[Session, Depends(get_db)]) -> ClassroomOut:
     if student.role != UserRole.STUDENT:
         raise HTTPException(status_code=403, detail="只有学生可以通过邀请码加入班级")
-    code = payload.invite_code.strip().upper()
+    code = payload.invite_code.strip()
     classroom = db.scalar(select(Classroom).where(Classroom.invite_code == code))
     if not classroom:
         raise HTTPException(status_code=404, detail="邀请码无效，请检查后重试")

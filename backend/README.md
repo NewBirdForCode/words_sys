@@ -43,8 +43,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8443 \
 | 同步 | `POST /api/wordbooks/{id}/sync` |
 | 学习记录 | `POST/GET /api/learning/records` |
 | 学习汇总 | `GET /api/learning/summary` |
-| 创建班级 | `POST /api/classrooms`，每个班级自动生成唯一邀请码 |
-| 学生加入班级 | `POST /api/classrooms/join`，学生提交邀请码 |
+| 创建班级 | `POST /api/classrooms`，每个班级自动生成唯一的 8 位纯数字邀请码 |
+| 学生加入班级 | `POST /api/classrooms/join`，学生提交 8 位数字邀请码 |
 | 刷新邀请码 | `POST /api/classrooms/{classroom_id}/invite-code` |
 | 错题本 | `GET/POST /api/mistakes`、`POST /api/mistakes/{word_id}/resolve`、`DELETE /api/mistakes/{word_id}` |
 | 抗遗忘进度 | `GET /api/memory-progress`、`POST /api/memory-progress` |
@@ -67,7 +67,7 @@ Authorization: Bearer <access_token>
 - 学习记录始终绑定当前登录学生，学生不能写入其他学生的学习状态。
 - 错题本、抗遗忘进度和计划设置按当前学生隔离保存。
 - 教师可通过班级词库关联把自定义词库同步给班级成员。
-- 一个教师可以创建多个班级，每个班级有独立的邀请码；刷新邀请码后旧邀请码立即失效。
+- 一个教师可以创建多个班级，每个班级有独立的 8 位纯数字邀请码；刷新邀请码后旧邀请码立即失效。
 - 学生只能通过邀请码加入班级，且学校信息必须与班级一致。
 - 管理员可发布系统词库；系统词库对所有学生可见，停用后不再出现在可用列表。
 

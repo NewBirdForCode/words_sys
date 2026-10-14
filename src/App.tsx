@@ -41,6 +41,7 @@ import {
   moveWordbook,
   getEffectiveModeForWordbook,
   setUserModeForWordbook,
+  syncWordbooksFromApi,
 } from './utils/wordbook';
 import { initSpeechSynthesis } from './utils/speech';
 import { loadSavedTheme, saveTheme, applyThemeToDOM } from './utils/theme';
@@ -140,41 +141,45 @@ export default function App() {
     applyThemeToDOM(currentTheme);
   }, [currentTheme]);
 
-  // 初始化加载
+  // 初始化加载：先从 FastAPI 同步词库，再生成本日任务池。
   useEffect(() => {
-    initSpeechSynthesis();
-    setAllLogs(getAllReviewLogs());
-
-    const currentWbId = getActiveWordbookId();
-    setActiveWbId(currentWbId);
-    const wb = getWordbookById(currentWbId) || getDefaultWordbook();
-    // 每天首次进入默认打开精选刷题；用户当天主动切换后遵循设置
-    const todayFirstEntryKey = userScopedStorageKey(`daily30_first_entry_default_${learningDate}`);
-    let effMode: LearningMode;
-    if (typeof window !== 'undefined' && !localStorage.getItem(todayFirstEntryKey)) {
-      localStorage.setItem(todayFirstEntryKey, 'true');
-      effMode = 'focused_quiz';
-      setUserModeForWordbook(currentWbId, 'focused_quiz');
-    } else {
-      effMode = getEffectiveModeForWordbook(wb);
-    }
-    setCurrentMode(effMode);
-
-    // 7天抗遗忘每日计划任务池 (复习到期词 + 今日新词)
-    const pool = getOrGenerateDailyTaskPool(currentWbId, learningDate, false, effMode);
-    setDailyTaskPool(pool);
-    setTodayWords(pool.allTaskWords);
-
-    // 初始化阶段二自测选择
-    const initSel: Record<string, WordSelection> = {};
-    pool.allTaskWords.forEach(w => {
-      initSel[w.id] = 'unanswered';
-    });
-    setStage2Selections(initSel);
-    setStage2Completed(false);
-
-    // 默认进入阶段一
-    setAppStage('stage1_shadowing');
+    let cancelled = false;
+    const initialize = async () => {
+      initSpeechSynthesis();
+      try {
+        const syncedBooks = await syncWordbooksFromApi();
+        if (!cancelled) setWordbooksList(syncedBooks);
+      } catch (error) {
+        if (!cancelled) {
+          setNotice({ type: 'warning', message: error instanceof Error ? error.message : '后端词库同步失败，将暂时使用本地缓存。' });
+        }
+      }
+      if (cancelled) return;
+      setAllLogs(getAllReviewLogs());
+      const currentWbId = getActiveWordbookId();
+      setActiveWbId(currentWbId);
+      const wb = getWordbookById(currentWbId) || getDefaultWordbook();
+      const todayFirstEntryKey = userScopedStorageKey(`daily30_first_entry_default_${learningDate}`);
+      let effMode: LearningMode;
+      if (typeof window !== 'undefined' && !localStorage.getItem(todayFirstEntryKey)) {
+        localStorage.setItem(todayFirstEntryKey, 'true');
+        effMode = 'focused_quiz';
+        setUserModeForWordbook(currentWbId, 'focused_quiz');
+      } else {
+        effMode = getEffectiveModeForWordbook(wb);
+      }
+      setCurrentMode(effMode);
+      const pool = getOrGenerateDailyTaskPool(currentWbId, learningDate, false, effMode);
+      setDailyTaskPool(pool);
+      setTodayWords(pool.allTaskWords);
+      const initSel: Record<string, WordSelection> = {};
+      pool.allTaskWords.forEach(w => { initSel[w.id] = 'unanswered'; });
+      setStage2Selections(initSel);
+      setStage2Completed(false);
+      setAppStage('stage1_shadowing');
+    };
+    void initialize();
+    return () => { cancelled = true; };
   }, [learningDate]);
 
   // 主动切换学习模式 (快速刷词 / 精选刷题)

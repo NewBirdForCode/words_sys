@@ -5,9 +5,48 @@ import { SYSTEM_WORDBOOKS_PRESETS } from '../data/systemWordbooks';
 import { userScopedStorageKey } from './userStorage';
 
 import { TEST_200_WORDBOOK } from '../data/test200Wordbook';
+import { archiveWordbookApi, createWordbookApi, fetchWordbooks, updateWordbookApi } from './api';
 
 const STORAGE_KEY_WORDBOOKS = userScopedStorageKey('daily30_wordbooks_v1');
 const STORAGE_KEY_ACTIVE_WORDBOOK_ID = userScopedStorageKey('daily30_active_wb_id_v1');
+
+/** 从 FastAPI 同步当前用户可访问的词库，同时保留前端内置系统词库作为离线兜底。 */
+export async function syncWordbooksFromApi(): Promise<Wordbook[]> {
+  const remote = await fetchWordbooks();
+  const localSystem = getAllWordbooks().filter(wb => wb.is_system);
+  const mergedById = new Map<string, Wordbook>();
+  [...localSystem, ...remote].forEach(book => mergedById.set(book.id, book));
+  const merged = Array.from(mergedById.values());
+  saveAllWordbooks(merged);
+  return merged;
+}
+
+export async function createWordbookOnApi(name: string, words: WordItem[], description?: string): Promise<Wordbook> {
+  const created = await createWordbookApi({ name, words, description, kind: 'personal' });
+  saveAllWordbooks([created, ...getAllWordbooks().filter(book => book.id !== created.id)]);
+  setActiveWordbookId(created.id);
+  return created;
+}
+
+export async function copySystemWordbookOnApi(systemWb: Wordbook): Promise<Wordbook> {
+  const created = await createWordbookApi({ name: systemWb.name, description: systemWb.description, words: systemWb.words, kind: 'personal' });
+  saveAllWordbooks([created, ...getAllWordbooks().filter(book => book.id !== created.id)]);
+  setActiveWordbookId(created.id);
+  return created;
+}
+
+export async function renameWordbookOnApi(id: string, name: string): Promise<Wordbook> {
+  const updated = await updateWordbookApi(id, { name });
+  saveAllWordbooks(getAllWordbooks().map(book => book.id === id ? updated : book));
+  return updated;
+}
+
+export async function archiveWordbookOnApi(id: string): Promise<void> {
+  await archiveWordbookApi(id);
+  const remaining = getAllWordbooks().filter(book => book.id !== id);
+  saveAllWordbooks(remaining);
+  if (getActiveWordbookId() === id) setActiveWordbookId(remaining[0]?.id || 'wb_default_core');
+}
 
 // Seed default wordbook if none exists
 export function getDefaultWordbook(): Wordbook {

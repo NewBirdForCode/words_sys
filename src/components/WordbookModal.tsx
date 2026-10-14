@@ -21,16 +21,16 @@ import {
 import { Wordbook, WordItem, WordbookCategory, LearningMode } from '../types';
 import {
   getAllWordbooks,
-  saveAllWordbooks,
   getActiveWordbookId,
   setActiveWordbookId,
-  createWordbook,
-  updateWordbookName,
-  deleteWordbook,
   parseWordbookText,
   parseExcelFile,
   getSystemWordbooks,
-  copySystemWordbookToUser
+  syncWordbooksFromApi,
+  createWordbookOnApi,
+  copySystemWordbookOnApi,
+  renameWordbookOnApi,
+  archiveWordbookOnApi,
 } from '../utils/wordbook';
 import { computeWordbookProgress } from '../utils/plan';
 import { prefetchWordbookEnrichment } from '../utils/wordEnrichment';
@@ -117,10 +117,13 @@ export const WordbookModal: React.FC<WordbookModalProps> = ({
   // Load wordbooks on open & handle keyboard shortcuts
   React.useEffect(() => {
     if (isOpen) {
-      const all = getAllWordbooks();
-      // 系统词库只在系统词库标签页展示；个人列表只保留用户导入/复制的词库。
-      setWordbooks(all.filter(wb => !wb.is_system && wb.id !== 'wb_default_core'));
-      setActiveWbId(getActiveWordbookId());
+      void syncWordbooksFromApi().then(all => {
+        setWordbooks(all.filter(wb => !wb.is_system && wb.id !== 'wb_default_core'));
+        setActiveWbId(getActiveWordbookId());
+      }).catch(() => {
+        const all = getAllWordbooks();
+        setWordbooks(all.filter(wb => !wb.is_system && wb.id !== 'wb_default_core'));
+      });
       setView('list');
       setActiveTab('my_books');
       setEditingId(null);
@@ -235,9 +238,15 @@ export const WordbookModal: React.FC<WordbookModalProps> = ({
   };
 
   // Confirm import and write to database
-  const handleConfirmImport = () => {
+  const handleConfirmImport = async () => {
     if (parsedWords.length === 0) return;
-    const created = createWordbook(newBookName, parsedWords);
+    let created: Wordbook;
+    try {
+      created = await createWordbookOnApi(newBookName, parsedWords);
+    } catch (error) {
+      setParseError(error instanceof Error ? error.message : '后端词库保存失败，请检查服务连接。');
+      return;
+    }
     setWordbooks(getCustomWordbooks());
     setActiveWbId(created.id);
     onActiveWordbookChange(created.id);
@@ -249,9 +258,14 @@ export const WordbookModal: React.FC<WordbookModalProps> = ({
   };
 
   // Delete wordbook
-  const handleDeleteWordbook = (id: string, name: string) => {
+  const handleDeleteWordbook = async (id: string, name: string) => {
     if (window.confirm(`确定要删除词库「${name}」吗？`)) {
-      deleteWordbook(id);
+      try {
+        await archiveWordbookOnApi(id);
+      } catch (error) {
+        setParseError(error instanceof Error ? error.message : '后端词库删除失败，请检查服务连接。');
+        return;
+      }
       const updated = getCustomWordbooks();
       setWordbooks(updated);
       const currentActive = getActiveWordbookId();
@@ -261,16 +275,27 @@ export const WordbookModal: React.FC<WordbookModalProps> = ({
   };
 
   // Save renamed wordbook
-  const handleSaveRename = (id: string) => {
+  const handleSaveRename = async (id: string) => {
     if (!editingName.trim()) return;
-    updateWordbookName(id, editingName);
+    try {
+      await renameWordbookOnApi(id, editingName);
+    } catch (error) {
+      setParseError(error instanceof Error ? error.message : '后端词库更新失败，请检查服务连接。');
+      return;
+    }
     setWordbooks(getCustomWordbooks());
     setEditingId(null);
   };
 
   // 用户点击系统词库的「加入学习」按钮：复制到个人列表并自动激活。
-  const handleUseSystemWordbook = (sysWb: Wordbook) => {
-    const userCopy = copySystemWordbookToUser(sysWb);
+  const handleUseSystemWordbook = async (sysWb: Wordbook) => {
+    let userCopy: Wordbook;
+    try {
+      userCopy = await copySystemWordbookOnApi(sysWb);
+    } catch (error) {
+      setCopiedFeedback(error instanceof Error ? error.message : '后端词库保存失败，请检查服务连接。');
+      return;
+    }
     const updated = getCustomWordbooks();
     setWordbooks(updated);
     setActiveWbId(userCopy.id);

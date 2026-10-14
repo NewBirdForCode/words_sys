@@ -295,7 +295,8 @@ def update_wordbook(wordbook_id: int, payload: WordbookUpdate, user: CurrentUser
         raise HTTPException(status_code=403, detail="只有词库创建者或管理员可以更新词库")
     if payload.name is not None: book.name = payload.name.strip()
     if payload.description is not None: book.description = payload.description
-    if payload.is_active is not None and user.role == UserRole.ADMIN: book.is_active = payload.is_active
+    if payload.is_active is not None and (user.role == UserRole.ADMIN or book.owner_id == user.id):
+        book.is_active = payload.is_active
     if payload.words is not None:
         book.words.clear()
         for item in payload.words:
@@ -307,6 +308,8 @@ def update_wordbook(wordbook_id: int, payload: WordbookUpdate, user: CurrentUser
         book.class_links.clear()
         for classroom_id in payload.classroom_ids: book.class_links.append(ClassWordbook(classroom_id=classroom_id, synced_version=book.source_version))
     db.commit(); db.refresh(book)
+    if not book.is_active:
+        return wordbook_out(book)
     return wordbook_out(accessible_wordbook(db, book.id, user))
 
 

@@ -117,9 +117,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
               type="password"
               value={password}
               onChange={event => setPassword(event.target.value)}
-              placeholder={isRegister ? '至少 6 位' : '请输入登录密码'}
+              placeholder={isRegister ? '至少 8 位' : '请输入登录密码'}
               autoComplete={isRegister ? 'new-password' : 'current-password'}
-              minLength={isRegister ? 6 : undefined}
+              minLength={isRegister ? 8 : undefined}
               className="w-full px-3.5 py-3 rounded-xl border border-[#DDE7E2] bg-white text-sm outline-none focus:border-[#38B889]"
               required
             />
@@ -137,7 +137,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
         </form>
 
         <p className="text-[11px] text-[#98A7AC] text-center mt-5 leading-relaxed">
-          用户信息保存在当前设备浏览器中；密码仅保存加密摘要，不会以明文保存。
+          用户信息和学习数据通过 FastAPI HTTPS 后端保存；密码不会以明文保存。
         </p>
       </section>
     </main>

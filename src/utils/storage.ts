@@ -1,5 +1,6 @@
 import { ActiveSessionState, ReviewLogRecord, WordStats, ReviewStage, MistakeItem } from '../types';
 import { getActiveUserId, userScopedStorageKey } from './userStorage';
+import { recordLearningApi } from './api';
 
 const STORAGE_KEY_LOGS = userScopedStorageKey('daily30_review_logs_v1');
 const STORAGE_KEY_ACTIVE_SESSION = userScopedStorageKey('daily30_active_session_v1');
@@ -147,12 +148,23 @@ export function getAllReviewLogs(): ReviewLogRecord[] {
 }
 
 // Append new records to the immutable audit log
-export function appendReviewLogs(newRecords: ReviewLogRecord[]): void {
+export function appendReviewLogs(newRecords: ReviewLogRecord[], syncRemote = true): void {
   if (typeof window === 'undefined' || newRecords.length === 0) return;
   try {
     const current = getAllReviewLogs();
     const updated = [...current, ...newRecords];
     localStorage.setItem(STORAGE_KEY_LOGS, JSON.stringify(updated));
+    if (syncRemote) {
+      newRecords.forEach(record => {
+        void recordLearningApi({
+          wordbookId: record.wordbook_id || '',
+          wordId: record.word_id,
+          result: record.result,
+          stage: record.review_stage,
+          reviewRound: record.round_id,
+        }).catch(error => console.warn('Failed to sync learning record to FastAPI:', error));
+      });
+    }
   } catch (e) {
     console.error('Failed to append review logs:', e);
   }

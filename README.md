@@ -19,6 +19,21 @@ View your app in AI Studio: https://ai.studio/apps/e2c08356-e880-4fbc-ae68-26fb6
 3. Run the app:
    `npm run dev`
 
+## FastAPI Backend Integration
+
+The React frontend now uses the FastAPI backend for registration, login/logout, wordbook loading and mutations, and learning-record writes. Set the backend URL before starting Vite:
+
+```bash
+cp .env.example .env.local
+# Local HTTPS backend:
+# VITE_API_BASE_URL="https://localhost:8443"
+npm run dev
+```
+
+Start the backend separately according to [backend/README.md](backend/README.md). The development HTTPS certificate is self-signed, so the browser must first open `https://localhost:8443/healthz` and accept the local certificate warning. In production, set `VITE_API_BASE_URL` to the trusted HTTPS domain of the deployed API.
+
+The browser keeps only the access token and a cached user profile locally. Business data is read from and written to FastAPI; the existing local cache is used only to keep the learning UI responsive and as a temporary offline fallback.
+
 ## Windows Desktop Packaging
 
 The project includes an Electron desktop wrapper. The desktop app starts the local API server automatically and loads the packaged React interface.

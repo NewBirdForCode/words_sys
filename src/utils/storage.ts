@@ -1,6 +1,7 @@
 import { ActiveSessionState, ReviewLogRecord, WordStats, ReviewStage, MistakeItem } from '../types';
 import { getActiveUserId, userScopedStorageKey } from './userStorage';
 import { recordLearningApi } from './api';
+import { deleteMistakeApi, fetchMistakes, resolveMistakeApi, upsertMistake } from './apiAdmin';
 
 const STORAGE_KEY_LOGS = userScopedStorageKey('daily30_review_logs_v1');
 const STORAGE_KEY_ACTIVE_SESSION = userScopedStorageKey('daily30_active_session_v1');
@@ -24,6 +25,19 @@ export function saveMistakeBook(book: Record<string, MistakeItem>): void {
   localStorage.setItem(STORAGE_KEY_MISTAKES, JSON.stringify(book));
 }
 
+export async function syncMistakesFromApi(): Promise<void> {
+  const remote = await fetchMistakes();
+  const book: Record<string, MistakeItem> = getMistakeBook();
+  remote.forEach(item => {
+    book[String(item.word_id)] = {
+      wordId: String(item.word_id), errorCount: item.error_count, consecutiveCorrect: item.consecutive_correct,
+      lastWrongAt: Date.parse(item.last_wrong_at) || Date.now(), lastReviewedAt: item.last_reviewed_at ? Date.parse(item.last_reviewed_at) : undefined,
+      resolvedAt: item.resolved_at ? Date.parse(item.resolved_at) : null, isResolvedInCurrentSession: item.is_resolved_current,
+    };
+  });
+  saveMistakeBook(book);
+}
+
 /**
  * 记录错词：新增或累计错误次数，重置连续掌握状态，进入待复习队列
  */
@@ -45,6 +59,7 @@ export function recordMistake(wordId: string): void {
     resolvedAt: null,
   };
   saveMistakeBook(book);
+  void upsertMistake(wordId).catch(error => console.warn('Failed to sync mistake to FastAPI:', error));
 }
 
 /**
@@ -62,6 +77,7 @@ export function resolveMistakeInSession(wordId: string): void {
       resolvedAt: Date.now(),
     };
     saveMistakeBook(book);
+    void resolveMistakeApi(wordId).catch(error => console.warn('Failed to sync resolved mistake to FastAPI:', error));
   }
 }
 
@@ -72,6 +88,7 @@ export function removeMistake(wordId: string): void {
   const book = getMistakeBook();
   delete book[wordId];
   saveMistakeBook(book);
+  void deleteMistakeApi(wordId).catch(error => console.warn('Failed to delete mistake on FastAPI:', error));
 }
 
 /**

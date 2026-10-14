@@ -34,6 +34,16 @@ Start the backend separately according to [backend/README.md](backend/README.md)
 
 The browser keeps only the access token and a cached user profile locally. Business data is read from and written to FastAPI; the existing local cache is used only to keep the learning UI responsive and as a temporary offline fallback.
 
+The following features are also backed by FastAPI:
+
+- mistake book records and resolution state
+- anti-forgetting memory progress
+- daily plan settings
+- teacher classroom management and class vocabulary publishing
+- administrator system vocabulary publishing and deactivation
+
+Teachers and administrators see the **班级管理** or **管理后台** entry in the left sidebar after login.
+
 ## Windows Desktop Packaging
 
 The project includes an Electron desktop wrapper. The desktop app starts the local API server automatically and loads the packaged React interface.

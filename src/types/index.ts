@@ -75,6 +75,7 @@ export interface UserProfile {
   className: string;
   school: string;
   createdAt: number;
+  role?: 'student' | 'teacher' | 'admin';
 }
 
 export interface SynonymEntry {

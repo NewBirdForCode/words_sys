@@ -28,7 +28,8 @@ import {
   getMistakesSorted,
   recordMistake,
   removeMistake,
-  getMistakeBook
+  getMistakeBook,
+  syncMistakesFromApi,
 } from './utils/storage';
 import {
   getActiveWordbookId,
@@ -60,6 +61,7 @@ import { MemoryStatsPanel } from './components/MemoryStatsPanel';
 import { CheckInModal } from './components/CheckInModal';
 import { SettingsDrawer } from './components/SettingsDrawer';
 import { PlanCalculatorModal } from './components/PlanCalculatorModal';
+import { RoleManagementPanel } from './components/RoleManagementPanel';
 import { AuthScreen } from './components/AuthScreen';
 import { getCurrentUser, logoutUser } from './utils/auth';
 import { userScopedStorageKey } from './utils/userStorage';
@@ -71,6 +73,8 @@ import {
   batchSyncWordLearningResults,
   invalidateDailyTaskPool,
   PlanSettings,
+  syncMemoryProgressFromApi,
+  syncPlanSettingsFromApi,
 } from './utils/plan';
 import { Wordbook, LearningMode } from './types';
 
@@ -132,6 +136,7 @@ export default function App() {
   // 弹窗状态
   const [isHistoryOpen, setIsHistoryOpen] = useState<boolean>(false);
   const [isWordbookModalOpen, setIsWordbookModalOpen] = useState<boolean>(false);
+  const [isRoleManagementOpen, setIsRoleManagementOpen] = useState<boolean>(false);
   const [allLogs, setAllLogs] = useState<ReviewLogRecord[]>([]);
 
   const topAnchorRef = useRef<HTMLDivElement>(null);
@@ -158,6 +163,8 @@ export default function App() {
       setAllLogs(getAllReviewLogs());
       const currentWbId = getActiveWordbookId();
       setActiveWbId(currentWbId);
+      await Promise.allSettled([syncMistakesFromApi(), syncMemoryProgressFromApi(), syncPlanSettingsFromApi(), syncPlanSettingsFromApi(currentWbId)]);
+      if (cancelled) return;
       const wb = getWordbookById(currentWbId) || getDefaultWordbook();
       const todayFirstEntryKey = userScopedStorageKey(`daily30_first_entry_default_${learningDate}`);
       let effMode: LearningMode;
@@ -566,6 +573,7 @@ export default function App() {
           }}
           autoSpeak={autoSpeakOnReveal}
           currentUser={currentUser}
+          onOpenRoleManagement={() => setIsRoleManagementOpen(true)}
           onLogout={() => {
             logoutUser();
             setCurrentUser(null);
@@ -766,6 +774,12 @@ export default function App() {
           setIsWordbookModalOpen(false);
           setWordbooksList(getAllWordbooks());
         }}
+      />
+
+      <RoleManagementPanel
+        isOpen={isRoleManagementOpen}
+        onClose={() => setIsRoleManagementOpen(false)}
+        currentUser={currentUser}
       />
 
       {/* 综合设置与偏好抽屉 (含词库计划管理、每日计划、发音、外观主题、学习模式) */}

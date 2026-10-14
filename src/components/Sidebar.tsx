@@ -13,6 +13,7 @@ import {
   ChevronDown,
   LogOut,
   UserRound
+  ,Shield
 } from 'lucide-react';
 import { AppStage, UserProfile } from '../types';
 
@@ -27,6 +28,7 @@ interface SidebarProps {
   onToggleAutoSpeak: () => void;
   currentUser: UserProfile;
   onLogout: () => void;
+  onOpenRoleManagement: () => void;
   isDark?: boolean;
 }
 
@@ -41,6 +43,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleAutoSpeak,
   currentUser,
   onLogout,
+  onOpenRoleManagement,
   isDark = false,
 }) => {
   const [isSettingsExpanded, setIsSettingsExpanded] = useState(false);
@@ -286,6 +289,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       <div className="space-y-2">
+        {(currentUser.role === 'teacher' || currentUser.role === 'admin') && (
+          <button type="button" onClick={onOpenRoleManagement} className={`w-full px-2.5 py-2 rounded-xl text-xs font-medium flex items-center gap-1.5 cursor-pointer ${isDark ? 'text-amber-200 hover:bg-neutral-800' : 'text-[#80601F] hover:bg-[#FFF8E8]'}`}>
+            <Shield className="w-3.5 h-3.5" />
+            <span>{currentUser.role === 'admin' ? '管理后台' : '班级管理'}</span>
+          </button>
+        )}
         <div className={`rounded-xl px-2.5 py-2 border ${isDark ? 'bg-neutral-800/70 border-neutral-700' : 'bg-[#F4FAF7] border-[#DDECE3]'}`}>
           <div className="flex items-center gap-1.5 mb-1">
             <UserRound className="w-3.5 h-3.5 text-emerald-600 shrink-0" />

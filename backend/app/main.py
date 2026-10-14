@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -20,6 +21,9 @@ from .models import (
     Classroom,
     ClassWordbook,
     LearningRecord,
+    MemoryProgress,
+    MistakeRecord,
+    PlanSettings,
     SessionToken,
     User,
     UserRole,
@@ -44,6 +48,12 @@ from .schemas import (
     WordbookOut,
     WordbookUpdate,
     WordOut,
+    MemoryProgressOut,
+    MemoryProgressUpsert,
+    MistakeOut,
+    MistakeUpsert,
+    PlanSettingsOut,
+    PlanSettingsUpsert,
 )
 
 
@@ -344,3 +354,99 @@ def list_learning_records(user: CurrentUser, db: Annotated[Session, Depends(get_
 def learning_summary(user: CurrentUser, db: Annotated[Session, Depends(get_db)]) -> list[LearningSummary]:
     rows = db.execute(select(LearningRecord.wordbook_id, func.count(LearningRecord.id), func.sum(LearningRecord.result == "known"), func.sum(LearningRecord.result == "wrong"), func.max(LearningRecord.reviewed_at)).where(LearningRecord.student_id == user.id).group_by(LearningRecord.wordbook_id)).all()
     return [LearningSummary(wordbook_id=row[0], total_events=int(row[1]), known_count=int(row[2] or 0), wrong_count=int(row[3] or 0), last_reviewed_at=row[4]) for row in rows]
+
+
+def check_word_access(db: Session, word_id: int, user: User, wordbook_id: int | None = None) -> tuple[Word, Wordbook]:
+    word = db.get(Word, word_id)
+    if not word or (wordbook_id is not None and word.wordbook_id != wordbook_id):
+        raise HTTPException(status_code=404, detail="单词不存在")
+    return word, accessible_wordbook(db, word.wordbook_id, user)
+
+
+@app.get("/api/mistakes", response_model=list[MistakeOut])
+def list_mistakes(user: CurrentUser, db: Annotated[Session, Depends(get_db)]) -> list[MistakeOut]:
+    records = db.scalars(select(MistakeRecord).where(MistakeRecord.student_id == user.id).order_by(MistakeRecord.error_count.desc(), MistakeRecord.last_wrong_at.desc())).all()
+    return [MistakeOut.model_validate(item) for item in records]
+
+
+@app.post("/api/mistakes", response_model=MistakeOut)
+def upsert_mistake(payload: MistakeUpsert, user: CurrentUser, db: Annotated[Session, Depends(get_db)]) -> MistakeOut:
+    word, book = check_word_access(db, payload.word_id, user, payload.wordbook_id)
+    record = db.scalar(select(MistakeRecord).where(MistakeRecord.student_id == user.id, MistakeRecord.word_id == word.id))
+    if record is None:
+        record = MistakeRecord(student_id=user.id, wordbook_id=book.id, word_id=word.id)
+        db.add(record)
+    else:
+        record.wordbook_id = book.id
+        record.error_count += 1
+        record.consecutive_correct = 0
+        record.last_wrong_at = now_utc()
+        record.is_resolved_current = False
+        record.resolved_at = None
+    db.commit(); db.refresh(record)
+    return MistakeOut.model_validate(record)
+
+
+@app.post("/api/mistakes/{word_id}/resolve", response_model=MistakeOut)
+def resolve_mistake(word_id: int, user: CurrentUser, db: Annotated[Session, Depends(get_db)]) -> MistakeOut:
+    record = db.scalar(select(MistakeRecord).where(MistakeRecord.student_id == user.id, MistakeRecord.word_id == word_id))
+    if not record:
+        raise HTTPException(status_code=404, detail="错题记录不存在")
+    record.consecutive_correct += 1; record.last_reviewed_at = now_utc(); record.resolved_at = now_utc(); record.is_resolved_current = True
+    db.commit(); db.refresh(record)
+    return MistakeOut.model_validate(record)
+
+
+@app.delete("/api/mistakes/{word_id}", status_code=204, response_model=None)
+def delete_mistake(word_id: int, user: CurrentUser, db: Annotated[Session, Depends(get_db)]) -> None:
+    record = db.scalar(select(MistakeRecord).where(MistakeRecord.student_id == user.id, MistakeRecord.word_id == word_id))
+    if record:
+        db.delete(record); db.commit()
+
+
+@app.post("/api/memory-progress", response_model=MemoryProgressOut)
+def upsert_memory_progress(payload: MemoryProgressUpsert, user: CurrentUser, db: Annotated[Session, Depends(get_db)]) -> MemoryProgressOut:
+    word, book = check_word_access(db, payload.word_id, user, payload.wordbook_id)
+    progress = db.scalar(select(MemoryProgress).where(MemoryProgress.student_id == user.id, MemoryProgress.wordbook_id == book.id, MemoryProgress.word_id == word.id))
+    if progress is None:
+        progress = MemoryProgress(student_id=user.id, wordbook_id=book.id, word_id=word.id)
+        db.add(progress)
+    for key, value in payload.model_dump(exclude={"wordbook_id", "word_id", "last_two_results"}).items(): setattr(progress, key, value)
+    progress.last_two_results_json = json.dumps(payload.last_two_results)
+    db.commit(); db.refresh(progress)
+    return MemoryProgressOut(**payload.model_dump(), id=progress.id, student_id=user.id, updated_at=progress.updated_at)
+
+
+@app.get("/api/memory-progress", response_model=list[MemoryProgressOut])
+def list_memory_progress(user: CurrentUser, db: Annotated[Session, Depends(get_db)], wordbook_id: int | None = None) -> list[MemoryProgressOut]:
+    query = select(MemoryProgress).where(MemoryProgress.student_id == user.id)
+    if wordbook_id is not None: query = query.where(MemoryProgress.wordbook_id == wordbook_id)
+    records = db.scalars(query).all(); output: list[MemoryProgressOut] = []
+    for item in records:
+        output.append(MemoryProgressOut(id=item.id, student_id=item.student_id, wordbook_id=item.wordbook_id, word_id=item.word_id, first_learned_date=item.first_learned_date, last_reviewed_date=item.last_reviewed_date, next_review_date=item.next_review_date, correct_count=item.correct_count, wrong_count=item.wrong_count, interval_step=item.interval_step, is_graduated=item.is_graduated, is_manually_mastered=item.is_manually_mastered, last_two_results=json.loads(item.last_two_results_json or "[]"), updated_at=item.updated_at))
+    return output
+
+
+def plan_query(db: Session, user_id: int, wordbook_id: int | None) -> PlanSettings | None:
+    condition = PlanSettings.wordbook_id.is_(None) if wordbook_id is None else PlanSettings.wordbook_id == wordbook_id
+    return db.scalar(select(PlanSettings).where(PlanSettings.student_id == user_id, condition))
+
+
+@app.get("/api/plan/settings", response_model=PlanSettingsOut)
+def get_plan_settings(user: CurrentUser, db: Annotated[Session, Depends(get_db)], wordbook_id: int | None = None) -> PlanSettingsOut:
+    if wordbook_id is not None: accessible_wordbook(db, wordbook_id, user)
+    settings = plan_query(db, user.id, wordbook_id)
+    if settings is None:
+        settings = PlanSettings(student_id=user.id, wordbook_id=wordbook_id); db.add(settings); db.commit(); db.refresh(settings)
+    return PlanSettingsOut(id=settings.id, student_id=settings.student_id, wordbook_id=settings.wordbook_id, daily_new_words=settings.daily_new_words, max_review_limit=settings.max_review_limit, interval_mode=settings.interval_mode, new_word_order=settings.new_word_order, updated_at=settings.updated_at)
+
+
+@app.put("/api/plan/settings", response_model=PlanSettingsOut)
+def upsert_plan_settings(payload: PlanSettingsUpsert, user: CurrentUser, db: Annotated[Session, Depends(get_db)]) -> PlanSettingsOut:
+    if payload.wordbook_id is not None: accessible_wordbook(db, payload.wordbook_id, user)
+    settings = plan_query(db, user.id, payload.wordbook_id)
+    if settings is None:
+        settings = PlanSettings(student_id=user.id, wordbook_id=payload.wordbook_id); db.add(settings)
+    for key, value in payload.model_dump().items(): setattr(settings, key, value)
+    db.commit(); db.refresh(settings)
+    return PlanSettingsOut(id=settings.id, student_id=settings.student_id, wordbook_id=settings.wordbook_id, daily_new_words=settings.daily_new_words, max_review_limit=settings.max_review_limit, interval_mode=settings.interval_mode, new_word_order=settings.new_word_order, updated_at=settings.updated_at)

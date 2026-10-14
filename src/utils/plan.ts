@@ -2,6 +2,7 @@ import { WordItem, Wordbook } from '../types';
 import { getWordbookById, getDefaultWordbook } from './wordbook';
 import { getTodayDateString } from './storage';
 import { userScopedStorageKey } from './userStorage';
+import { fetchMemoryProgress, fetchPlanSettings, saveMemoryProgress, savePlanSettingsApi } from './apiAdmin';
 
 export type IntervalScheduleMode = 'standard' | 'relaxed';
 export type NewWordOrder = 'random' | 'alphabetical';
@@ -176,6 +177,23 @@ export function getPlanSettings(): PlanSettings {
 export function savePlanSettings(settings: PlanSettings): void {
   if (typeof window === 'undefined') return;
   localStorage.setItem(STORAGE_KEY_PLAN_SETTINGS, JSON.stringify(settings));
+  void savePlanSettingsApi(settings).catch(error => console.warn('Failed to sync plan settings to FastAPI:', error));
+}
+
+export async function syncPlanSettingsFromApi(wordbookId?: string): Promise<void> {
+  const remote = await fetchPlanSettings(wordbookId);
+  const settings: PlanSettings = {
+    dailyNewWords: remote.daily_new_words, maxReviewLimit: remote.max_review_limit,
+    intervalMode: remote.interval_mode, newWordOrder: remote.new_word_order,
+  };
+  if (wordbookId) {
+    const raw = localStorage.getItem(STORAGE_KEY_WORDBOOK_PLANS);
+    const parsed = raw ? JSON.parse(raw) : {};
+    parsed[wordbookId] = { ...(parsed[wordbookId] || {}), dailyNewWords: settings.dailyNewWords, updatedAt: Date.now() };
+    localStorage.setItem(STORAGE_KEY_WORDBOOK_PLANS, JSON.stringify(parsed));
+  } else {
+    localStorage.setItem(STORAGE_KEY_PLAN_SETTINGS, JSON.stringify(settings));
+  }
 }
 
 /**
@@ -198,6 +216,24 @@ export function getAllMemoryProgress(): Record<string, WordMemoryProgress> {
  */
 export function saveAllMemoryProgress(data: Record<string, WordMemoryProgress>): void {
   if (typeof window === 'undefined') return;
+  localStorage.setItem(STORAGE_KEY_MEMORY_PROGRESS, JSON.stringify(data));
+  Object.values(data).forEach(progress => {
+    void saveMemoryProgress(progress as unknown as Record<string, unknown>).catch(error => console.warn('Failed to sync memory progress to FastAPI:', error));
+  });
+}
+
+export async function syncMemoryProgressFromApi(): Promise<void> {
+  const remote = await fetchMemoryProgress();
+  const data: Record<string, WordMemoryProgress> = getAllMemoryProgress();
+  remote.forEach(item => {
+    const progress: WordMemoryProgress = {
+      wordId: String(item.word_id), wordbookId: String(item.wordbook_id), firstLearnedDate: item.first_learned_date,
+      lastReviewedDate: item.last_reviewed_date, nextReviewDate: item.next_review_date, correctCount: item.correct_count,
+      wrongCount: item.wrong_count, intervalStep: item.interval_step, isGraduated: item.is_graduated,
+      isManuallyMastered: item.is_manually_mastered, lastTwoResults: item.last_two_results,
+    };
+    data[getWordKey(progress.wordbookId, progress.wordId)] = progress;
+  });
   localStorage.setItem(STORAGE_KEY_MEMORY_PROGRESS, JSON.stringify(data));
 }
 
@@ -243,6 +279,7 @@ export function setWordbookDailyNewWords(wordbookId: string, dailyNewWords: numb
       updatedAt: Date.now(),
     };
     localStorage.setItem(STORAGE_KEY_WORDBOOK_PLANS, JSON.stringify(parsed));
+    void savePlanSettingsApi({ ...getPlanSettings(), wordbookId, dailyNewWords: parsed[wordbookId].dailyNewWords }).catch(error => console.warn('Failed to sync wordbook plan to FastAPI:', error));
     invalidateDailyTaskPool(wordbookId);
   } catch (e) {
     console.error('Failed to set wordbook plan:', e);

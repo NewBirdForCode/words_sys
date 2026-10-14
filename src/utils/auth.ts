@@ -16,6 +16,7 @@ function toUserProfile(user: ApiUser): UserProfile {
     className: user.class_name || '',
     school: user.school_name || '',
     createdAt: Date.parse(user.created_at) || Date.now(),
+    role: user.role,
   };
 }
 

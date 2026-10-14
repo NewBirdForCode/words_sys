@@ -43,6 +43,9 @@ uvicorn app.main:app --host 0.0.0.0 --port 8443 \
 | 同步 | `POST /api/wordbooks/{id}/sync` |
 | 学习记录 | `POST/GET /api/learning/records` |
 | 学习汇总 | `GET /api/learning/summary` |
+| 错题本 | `GET/POST /api/mistakes`、`POST /api/mistakes/{word_id}/resolve`、`DELETE /api/mistakes/{word_id}` |
+| 抗遗忘进度 | `GET /api/memory-progress`、`POST /api/memory-progress` |
+| 每日计划 | `GET /api/plan/settings`、`PUT /api/plan/settings` |
 | 健康检查 | `GET /healthz` |
 
 登录后在请求中携带：
@@ -59,6 +62,9 @@ Authorization: Bearer <access_token>
 - 教师词库更新后递增 `source_version`；班级学生读取的是同一份最新词库内容。
 - 系统词库只能由管理员创建或更新。
 - 学习记录始终绑定当前登录学生，学生不能写入其他学生的学习状态。
+- 错题本、抗遗忘进度和计划设置按当前学生隔离保存。
+- 教师可通过班级词库关联把自定义词库同步给班级成员。
+- 管理员可发布系统词库；系统词库对所有学生可见，停用后不再出现在可用列表。
 
 ## 首个管理员
 

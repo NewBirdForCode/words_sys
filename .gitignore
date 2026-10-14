@@ -6,3 +6,9 @@ coverage/
 *.log
 .env*
 !.env.example
+!backend/.env.example
+backend/.venv/
+backend/data/
+backend/certs/*.pem
+__pycache__/
+*.py[cod]

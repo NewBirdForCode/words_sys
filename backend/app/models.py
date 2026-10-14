@@ -48,6 +48,7 @@ class Classroom(Base):
     name: Mapped[str] = mapped_column(String(160))
     school_name: Mapped[str] = mapped_column(String(160), index=True)
     teacher_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    invite_code: Mapped[str] = mapped_column(String(16), unique=True, index=True, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     teacher: Mapped[User] = relationship(foreign_keys=[teacher_id])
     members: Mapped[list[ClassMember]] = relationship(back_populates="classroom", cascade="all, delete-orphan")

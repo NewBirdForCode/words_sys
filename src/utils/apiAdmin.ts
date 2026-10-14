@@ -26,7 +26,7 @@ export interface ApiPlanSettings {
   id: number; student_id: number; wordbook_id?: number | null; daily_new_words: number; max_review_limit: number;
   interval_mode: 'standard' | 'relaxed'; new_word_order: 'random' | 'alphabetical'; updated_at: string;
 }
-export interface ApiClassroom { id: number; name: string; school_name: string; teacher_id: number; created_at: string; student_count: number; }
+export interface ApiClassroom { id: number; name: string; school_name: string; teacher_id: number; created_at: string; student_count: number; invite_code?: string | null; }
 
 export async function fetchMistakes(): Promise<ApiMistake[]> { return requestJson('/api/mistakes'); }
 export async function upsertMistake(wordId: string, wordbookId?: string): Promise<ApiMistake | null> {
@@ -66,7 +66,8 @@ export async function savePlanSettingsApi(input: { wordbookId?: string; dailyNew
 export async function fetchClassrooms(): Promise<ApiClassroom[]> { return requestJson('/api/classrooms'); }
 export async function createClassroomApi(name: string, schoolName: string): Promise<ApiClassroom> { return requestJson('/api/classrooms', { method: 'POST', body: JSON.stringify({ name, school_name: schoolName }) }); }
 export async function fetchClassStudents(classroomId: number): Promise<ApiUser[]> { return requestJson(`/api/classrooms/${classroomId}/students`); }
-export async function addStudentToClass(classroomId: number, studentId: number): Promise<ApiClassroom> { return requestJson(`/api/classrooms/${classroomId}/students`, { method: 'POST', body: JSON.stringify({ student_id: studentId }) }); }
+export async function joinClassByInvite(inviteCode: string): Promise<ApiClassroom> { return requestJson('/api/classrooms/join', { method: 'POST', body: JSON.stringify({ invite_code: inviteCode }) }); }
+export async function regenerateClassInvite(classroomId: number): Promise<ApiClassroom> { return requestJson(`/api/classrooms/${classroomId}/invite-code`, { method: 'POST' }); }
 
 export async function createSystemWordbookApi(name: string, description: string, words: WordItem[]): Promise<Wordbook> {
   return createWordbookApi({ name, description, words, kind: 'system' });

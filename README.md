@@ -42,7 +42,7 @@ The following features are also backed by FastAPI:
 - teacher classroom management and class vocabulary publishing
 - administrator system vocabulary publishing and deactivation
 
-Teachers and administrators see the **班级管理** or **管理后台** entry in the left sidebar after login.
+Teachers and administrators see the **班级管理** or **管理后台** entry in the left sidebar after login. A teacher can create multiple classes; each class automatically receives a unique invite code. Students use the **加入班级** entry to enter the code supplied by their teacher. Regenerating a code immediately invalidates the previous code.
 
 ## Windows Desktop Packaging
 

@@ -29,6 +29,7 @@ interface SidebarProps {
   currentUser: UserProfile;
   onLogout: () => void;
   onOpenRoleManagement: () => void;
+  onOpenJoinClass: () => void;
   isDark?: boolean;
 }
 
@@ -44,6 +45,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   currentUser,
   onLogout,
   onOpenRoleManagement,
+  onOpenJoinClass,
   isDark = false,
 }) => {
   const [isSettingsExpanded, setIsSettingsExpanded] = useState(false);
@@ -293,6 +295,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button type="button" onClick={onOpenRoleManagement} className={`w-full px-2.5 py-2 rounded-xl text-xs font-medium flex items-center gap-1.5 cursor-pointer ${isDark ? 'text-amber-200 hover:bg-neutral-800' : 'text-[#80601F] hover:bg-[#FFF8E8]'}`}>
             <Shield className="w-3.5 h-3.5" />
             <span>{currentUser.role === 'admin' ? '管理后台' : '班级管理'}</span>
+          </button>
+        )}
+        {currentUser.role === 'student' && (
+          <button type="button" onClick={onOpenJoinClass} className={`w-full px-2.5 py-2 rounded-xl text-xs font-medium flex items-center gap-1.5 cursor-pointer ${isDark ? 'text-emerald-200 hover:bg-neutral-800' : 'text-emerald-700 hover:bg-[#F0FAF5]'}`}>
+            <UserRound className="w-3.5 h-3.5" />
+            <span>加入班级</span>
           </button>
         )}
         <div className={`rounded-xl px-2.5 py-2 border ${isDark ? 'bg-neutral-800/70 border-neutral-700' : 'bg-[#F4FAF7] border-[#DDECE3]'}`}>

@@ -37,10 +37,13 @@ class ClassroomCreate(BaseModel):
 
 class ClassroomOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    id: int; name: str; school_name: str; teacher_id: int; created_at: datetime; student_count: int = 0
+    id: int; name: str; school_name: str; teacher_id: int; created_at: datetime; student_count: int = 0; invite_code: str | None = None
 
 class ClassMemberAdd(BaseModel):
     student_id: int
+
+class JoinClassroomRequest(BaseModel):
+    invite_code: str = Field(min_length=4, max_length=16)
 
 class WordInput(BaseModel):
     external_id: str | None = None; word: str = Field(min_length=1, max_length=160)

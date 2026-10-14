@@ -12,7 +12,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pwdlib import PasswordHash
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, inspect, or_, select, text
 from sqlalchemy.orm import Session, selectinload
 
 from .db import Base, engine, get_db
@@ -33,9 +33,9 @@ from .models import (
     utcnow,
 )
 from .schemas import (
-    ClassMemberAdd,
     ClassroomCreate,
     ClassroomOut,
+    JoinClassroomRequest,
     LearningRecordCreate,
     LearningRecordOut,
     LearningSummary,
@@ -72,10 +72,26 @@ app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=True
 @app.on_event("startup")
 def on_startup() -> None:
     Base.metadata.create_all(bind=engine)
+    columns = {column["name"] for column in inspect(engine).get_columns("classrooms")}
+    if "invite_code" not in columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE classrooms ADD COLUMN invite_code VARCHAR(16) NOT NULL DEFAULT ''"))
+    with Session(bind=engine) as db:
+        classrooms = db.scalars(select(Classroom).where(Classroom.invite_code == "")).all()
+        for classroom in classrooms:
+            classroom.invite_code = generate_invite_code(db)
+        db.commit()
 
 
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+def generate_invite_code(db: Session) -> str:
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    while True:
+        code = "".join(secrets.choice(alphabet) for _ in range(8))
+        if not db.scalar(select(Classroom.id).where(Classroom.invite_code == code)):
+            return code
 
 
 def as_utc(value: datetime) -> datetime:
@@ -228,9 +244,9 @@ def admin_create_user(payload: UserCreate, admin: AdminOnly, db: Annotated[Sessi
 
 @app.post("/api/classrooms", response_model=ClassroomOut, status_code=201)
 def create_class(payload: ClassroomCreate, teacher: TeacherOrAdmin, db: Annotated[Session, Depends(get_db)]) -> ClassroomOut:
-    classroom = Classroom(name=payload.name.strip(), school_name=payload.school_name.strip(), teacher_id=teacher.id)
+    classroom = Classroom(name=payload.name.strip(), school_name=payload.school_name.strip(), teacher_id=teacher.id, invite_code=generate_invite_code(db))
     db.add(classroom); db.commit(); db.refresh(classroom)
-    return ClassroomOut.model_validate(classroom).model_copy(update={"student_count": 0})
+    return ClassroomOut.model_validate(classroom).model_copy(update={"student_count": 0, "invite_code": classroom.invite_code})
 
 
 @app.get("/api/classrooms", response_model=list[ClassroomOut])
@@ -241,19 +257,29 @@ def list_classes(user: CurrentUser, db: Annotated[Session, Depends(get_db)]) -> 
         classes = db.scalars(select(Classroom).options(selectinload(Classroom.members)).where(Classroom.teacher_id == user.id)).all()
     else:
         classes = db.scalars(select(Classroom).options(selectinload(Classroom.members)).join(ClassMember).where(ClassMember.student_id == user.id)).all()
-    return [ClassroomOut.model_validate(item).model_copy(update={"student_count": len(item.members)}) for item in classes]
+    return [ClassroomOut.model_validate(item).model_copy(update={"student_count": len(item.members), "invite_code": item.invite_code if user.role in (UserRole.TEACHER, UserRole.ADMIN) else None}) for item in classes]
 
-
-@app.post("/api/classrooms/{classroom_id}/students", response_model=ClassroomOut)
-def add_student(classroom_id: int, payload: ClassMemberAdd, teacher: TeacherOrAdmin, db: Annotated[Session, Depends(get_db)]) -> ClassroomOut:
-    classroom = check_class_access(db, classroom_id, teacher, manage=True)
-    student = db.get(User, payload.student_id)
-    if not student or student.role != UserRole.STUDENT:
-        raise HTTPException(status_code=404, detail="学生不存在")
-    if not db.scalar(select(ClassMember).where(ClassMember.classroom_id == classroom_id, ClassMember.student_id == student.id)):
-        db.add(ClassMember(classroom_id=classroom_id, student_id=student.id)); db.commit()
+@app.post("/api/classrooms/join", response_model=ClassroomOut)
+def join_class(payload: JoinClassroomRequest, student: CurrentUser, db: Annotated[Session, Depends(get_db)]) -> ClassroomOut:
+    if student.role != UserRole.STUDENT:
+        raise HTTPException(status_code=403, detail="只有学生可以通过邀请码加入班级")
+    code = payload.invite_code.strip().upper()
+    classroom = db.scalar(select(Classroom).where(Classroom.invite_code == code))
+    if not classroom:
+        raise HTTPException(status_code=404, detail="邀请码无效，请检查后重试")
+    if student.school_name and classroom.school_name and student.school_name.strip() != classroom.school_name.strip():
+        raise HTTPException(status_code=403, detail="该邀请码属于其他学校，不能加入")
+    if not db.scalar(select(ClassMember).where(ClassMember.classroom_id == classroom.id, ClassMember.student_id == student.id)):
+        db.add(ClassMember(classroom_id=classroom.id, student_id=student.id)); db.commit()
     db.refresh(classroom)
-    return ClassroomOut.model_validate(classroom).model_copy(update={"student_count": len(classroom.members)})
+    return ClassroomOut.model_validate(classroom).model_copy(update={"student_count": len(classroom.members), "invite_code": None})
+
+@app.post("/api/classrooms/{classroom_id}/invite-code", response_model=ClassroomOut)
+def regenerate_class_invite(classroom_id: int, teacher: TeacherOrAdmin, db: Annotated[Session, Depends(get_db)]) -> ClassroomOut:
+    classroom = check_class_access(db, classroom_id, teacher, manage=True)
+    classroom.invite_code = generate_invite_code(db)
+    db.commit(); db.refresh(classroom)
+    return ClassroomOut.model_validate(classroom).model_copy(update={"student_count": len(classroom.members), "invite_code": classroom.invite_code})
 
 
 @app.get("/api/classrooms/{classroom_id}/students", response_model=list[UserOut])

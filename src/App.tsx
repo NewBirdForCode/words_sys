@@ -62,6 +62,7 @@ import { CheckInModal } from './components/CheckInModal';
 import { SettingsDrawer } from './components/SettingsDrawer';
 import { PlanCalculatorModal } from './components/PlanCalculatorModal';
 import { RoleManagementPanel } from './components/RoleManagementPanel';
+import { JoinClassPanel } from './components/JoinClassPanel';
 import { AuthScreen } from './components/AuthScreen';
 import { getCurrentUser, logoutUser } from './utils/auth';
 import { userScopedStorageKey } from './utils/userStorage';
@@ -137,6 +138,7 @@ export default function App() {
   const [isHistoryOpen, setIsHistoryOpen] = useState<boolean>(false);
   const [isWordbookModalOpen, setIsWordbookModalOpen] = useState<boolean>(false);
   const [isRoleManagementOpen, setIsRoleManagementOpen] = useState<boolean>(false);
+  const [isJoinClassOpen, setIsJoinClassOpen] = useState<boolean>(false);
   const [allLogs, setAllLogs] = useState<ReviewLogRecord[]>([]);
 
   const topAnchorRef = useRef<HTMLDivElement>(null);
@@ -574,6 +576,7 @@ export default function App() {
           autoSpeak={autoSpeakOnReveal}
           currentUser={currentUser}
           onOpenRoleManagement={() => setIsRoleManagementOpen(true)}
+          onOpenJoinClass={() => setIsJoinClassOpen(true)}
           onLogout={() => {
             logoutUser();
             setCurrentUser(null);
@@ -780,6 +783,12 @@ export default function App() {
         isOpen={isRoleManagementOpen}
         onClose={() => setIsRoleManagementOpen(false)}
         currentUser={currentUser}
+      />
+
+      <JoinClassPanel
+        isOpen={isJoinClassOpen}
+        onClose={() => setIsJoinClassOpen(false)}
+        onJoined={() => { void syncWordbooksFromApi(); }}
       />
 
       {/* 综合设置与偏好抽屉 (含词库计划管理、每日计划、发音、外观主题、学习模式) */}

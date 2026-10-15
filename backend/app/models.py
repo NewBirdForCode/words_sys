@@ -67,6 +67,7 @@ class ClassMember(Base):
 class Wordbook(Base):
     __tablename__ = "wordbooks"
     id: Mapped[int] = mapped_column(primary_key=True)
+    external_id: Mapped[str | None] = mapped_column(String(160), unique=True, nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     kind: Mapped[WordbookKind] = mapped_column(SqlEnum(WordbookKind), index=True)

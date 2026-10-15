@@ -16,6 +16,7 @@ from sqlalchemy import func, inspect, or_, select, text
 from sqlalchemy.orm import Session, selectinload
 
 from .db import Base, engine, get_db
+from .system_wordbooks import seed_system_wordbooks
 from .models import (
     ClassMember,
     Classroom,
@@ -72,6 +73,11 @@ app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=True
 @app.on_event("startup")
 def on_startup() -> None:
     Base.metadata.create_all(bind=engine)
+    wordbook_columns = {column["name"] for column in inspect(engine).get_columns("wordbooks")}
+    if "external_id" not in wordbook_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE wordbooks ADD COLUMN external_id VARCHAR(160)"))
+            connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_wordbooks_external_id ON wordbooks (external_id)"))
     columns = {column["name"] for column in inspect(engine).get_columns("classrooms")}
     if "invite_code" not in columns:
         with engine.begin() as connection:
@@ -82,6 +88,8 @@ def on_startup() -> None:
             if len(classroom.invite_code or "") != 8 or not classroom.invite_code.isdigit():
                 classroom.invite_code = generate_invite_code(db)
         db.commit()
+    with Session(bind=engine) as db:
+        seed_system_wordbooks(db)
 
 
 def now_utc() -> datetime:

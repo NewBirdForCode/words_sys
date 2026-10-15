@@ -1,6 +1,6 @@
 import { UserProfile, WordItem, Wordbook } from '../types';
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://localhost:8443').replace(/\/$/, '');
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? 'https://localhost:8443').replace(/\/$/, '');
 const TOKEN_KEY = 'words_sys_api_token_v1';
 const USER_KEY = 'words_sys_api_user_v1';
 const CURRENT_USER_KEY = 'daily30_current_user_v1';

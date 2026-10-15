@@ -24,6 +24,8 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(80), index=True)
     email: Mapped[str | None] = mapped_column(String(255), unique=True, index=True, nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255))
+    city_name: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    district_name: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     school_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
     class_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
     role: Mapped[UserRole] = mapped_column(SqlEnum(UserRole), default=UserRole.STUDENT, index=True)
@@ -46,6 +48,8 @@ class Classroom(Base):
     __tablename__ = "classrooms"
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(160))
+    city_name: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    district_name: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     school_name: Mapped[str] = mapped_column(String(160), index=True)
     teacher_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
     invite_code: Mapped[str] = mapped_column(String(16), unique=True, index=True, default="")

@@ -8,6 +8,8 @@ const CURRENT_USER_KEY = 'daily30_current_user_v1';
 export interface ApiUser {
   id: number;
   name: string;
+  city_name?: string | null;
+  district_name?: string | null;
   email?: string | null;
   school_name?: string | null;
   class_name?: string | null;
@@ -111,10 +113,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return payload as T;
 }
 
-export async function registerUser(input: { name: string; className: string; school: string; password: string }): Promise<ApiUser> {
+export async function registerUser(input: { name: string; role: 'student' | 'teacher'; className: string; city: string; district: string; school: string; password: string }): Promise<ApiUser> {
   const result = await request<{ access_token: string; user: ApiUser }>('/api/auth/register', {
     method: 'POST',
-    body: JSON.stringify({ name: input.name, password: input.password, school_name: input.school, class_name: input.className }),
+    body: JSON.stringify({ name: input.name, role: input.role, password: input.password, city_name: input.city, district_name: input.district, school_name: input.school, class_name: input.className }),
   });
   setApiSession(result.access_token, result.user);
   return result.user;

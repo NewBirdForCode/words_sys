@@ -12,7 +12,10 @@ type AuthMode = 'login' | 'register';
 export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
   const [mode, setMode] = useState<AuthMode>(() => (hasUsers() ? 'login' : 'register'));
   const [name, setName] = useState('');
+  const [role, setRole] = useState<'student' | 'teacher'>('student');
   const [className, setClassName] = useState('');
+  const [city, setCity] = useState('');
+  const [district, setDistrict] = useState('');
   const [school, setSchool] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -26,7 +29,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
     setIsSubmitting(true);
     try {
       const user = isRegister
-        ? await createUser({ name, className, school, password })
+        ? await createUser({ name, role, className, city, district, school, password })
         : await loginUser(name, password);
       onAuthenticated(user);
     } catch (submitError) {
@@ -89,21 +92,38 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
           {isRegister && (
             <>
               <label className="block">
-                <span className="block text-xs font-bold text-[#2C2C2C] mb-1.5">班级</span>
+                <span className="block text-xs font-bold text-[#2C2C2C] mb-1.5">角色</span>
+                <select value={role} onChange={event => setRole(event.target.value as 'student' | 'teacher')} className="w-full px-3.5 py-3 rounded-xl border border-[#DDE7E2] bg-white text-sm outline-none focus:border-[#38B889]">
+                  <option value="student">学生</option>
+                  <option value="teacher">老师</option>
+                </select>
+              </label>
+              <label className="block">
+                <span className="block text-xs font-bold text-[#2C2C2C] mb-1.5">班级{role === 'teacher' ? '（学生可不填）' : ''}</span>
                 <input
                   value={className}
                   onChange={event => setClassName(event.target.value)}
                   placeholder="例如：五年级 2 班"
                   className="w-full px-3.5 py-3 rounded-xl border border-[#DDE7E2] bg-white text-sm outline-none focus:border-[#38B889]"
-                  required
+                  required={role === 'student'}
                 />
               </label>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block">
+                  <span className="block text-xs font-bold text-[#2C2C2C] mb-1.5">城市</span>
+                  <input value={city} onChange={event => setCity(event.target.value)} placeholder="例如：深圳市" className="w-full px-3.5 py-3 rounded-xl border border-[#DDE7E2] bg-white text-sm outline-none focus:border-[#38B889]" required />
+                </label>
+                <label className="block">
+                  <span className="block text-xs font-bold text-[#2C2C2C] mb-1.5">区</span>
+                  <input value={district} onChange={event => setDistrict(event.target.value)} placeholder="例如：南山区" className="w-full px-3.5 py-3 rounded-xl border border-[#DDE7E2] bg-white text-sm outline-none focus:border-[#38B889]" required />
+                </label>
+              </div>
               <label className="block">
-                <span className="block text-xs font-bold text-[#2C2C2C] mb-1.5">学校</span>
+                <span className="block text-xs font-bold text-[#2C2C2C] mb-1.5">学校名称</span>
                 <input
                   value={school}
                   onChange={event => setSchool(event.target.value)}
-                  placeholder="请输入学校名称"
+                  placeholder="请输入学校名称（城市 + 区 + 学校用于区分）"
                   className="w-full px-3.5 py-3 rounded-xl border border-[#DDE7E2] bg-white text-sm outline-none focus:border-[#38B889]"
                   required
                 />

@@ -8,6 +8,8 @@ class UserCreate(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     password: str = Field(min_length=8, max_length=128)
     email: EmailStr | None = None
+    city_name: str | None = Field(default=None, max_length=80)
+    district_name: str | None = Field(default=None, max_length=80)
     school_name: str | None = Field(default=None, max_length=160)
     class_name: str | None = Field(default=None, max_length=160)
     role: UserRole = UserRole.STUDENT
@@ -15,13 +17,15 @@ class UserCreate(BaseModel):
 class UserUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=80)
     email: EmailStr | None = None
+    city_name: str | None = Field(default=None, max_length=80)
+    district_name: str | None = Field(default=None, max_length=80)
     school_name: str | None = Field(default=None, max_length=160)
     class_name: str | None = Field(default=None, max_length=160)
     password: str | None = Field(default=None, min_length=8, max_length=128)
 
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    id: int; name: str; email: EmailStr | None; school_name: str | None; class_name: str | None
+    id: int; name: str; email: EmailStr | None; city_name: str | None; district_name: str | None; school_name: str | None; class_name: str | None
     role: UserRole; is_active: bool; created_at: datetime
 
 class LoginRequest(BaseModel):
@@ -33,11 +37,13 @@ class TokenOut(BaseModel):
 
 class ClassroomCreate(BaseModel):
     name: str = Field(min_length=1, max_length=160)
+    city_name: str = Field(min_length=1, max_length=80)
+    district_name: str = Field(min_length=1, max_length=80)
     school_name: str = Field(min_length=1, max_length=160)
 
 class ClassroomOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    id: int; name: str; school_name: str; teacher_id: int; created_at: datetime; student_count: int = 0; invite_code: str | None = None
+    id: int; name: str; city_name: str | None; district_name: str | None; school_name: str; teacher_id: int; created_at: datetime; student_count: int = 0; invite_code: str | None = None
 
 class ClassMemberAdd(BaseModel):
     student_id: int

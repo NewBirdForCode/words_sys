@@ -73,6 +73,8 @@ export interface UserProfile {
   id: string;
   name: string;
   className: string;
+  city: string;
+  district: string;
   school: string;
   createdAt: number;
   role?: 'student' | 'teacher' | 'admin';

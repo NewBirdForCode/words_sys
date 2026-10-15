@@ -14,6 +14,8 @@ function toUserProfile(user: ApiUser): UserProfile {
     id: String(user.id),
     name: user.name,
     className: user.class_name || '',
+    city: user.city_name || '',
+    district: user.district_name || '',
     school: user.school_name || '',
     createdAt: Date.parse(user.created_at) || Date.now(),
     role: user.role,
@@ -31,7 +33,10 @@ export function hasUsers(): boolean {
 
 export async function createUser(input: {
   name: string;
+  role: 'student' | 'teacher';
   className: string;
+  city: string;
+  district: string;
   school: string;
   password: string;
 }): Promise<UserProfile> {

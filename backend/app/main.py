@@ -73,6 +73,17 @@ app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=True
 @app.on_event("startup")
 def on_startup() -> None:
     Base.metadata.create_all(bind=engine)
+    user_columns = {column["name"] for column in inspect(engine).get_columns("users")}
+    classroom_columns = {column["name"] for column in inspect(engine).get_columns("classrooms")}
+    with engine.begin() as connection:
+        if "city_name" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN city_name VARCHAR(80)"))
+        if "district_name" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN district_name VARCHAR(80)"))
+        if "city_name" not in classroom_columns:
+            connection.execute(text("ALTER TABLE classrooms ADD COLUMN city_name VARCHAR(80)"))
+        if "district_name" not in classroom_columns:
+            connection.execute(text("ALTER TABLE classrooms ADD COLUMN district_name VARCHAR(80)"))
     wordbook_columns = {column["name"] for column in inspect(engine).get_columns("wordbooks")}
     if "external_id" not in wordbook_columns:
         with engine.begin() as connection:
@@ -195,12 +206,12 @@ def healthz() -> dict[str, str]:
 
 @app.post("/api/auth/register", response_model=TokenOut, status_code=201)
 def register(payload: UserCreate, db: Annotated[Session, Depends(get_db)]) -> TokenOut:
-    if payload.role != UserRole.STUDENT:
-        raise HTTPException(status_code=403, detail="公开注册只能创建学生，教师和管理员由管理员创建")
+    if payload.role == UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="管理员账号不能公开注册")
     existing = db.scalar(select(User).where(or_(User.name == payload.name, payload.email is not None and User.email == payload.email)))
     if existing:
         raise HTTPException(status_code=409, detail="名字或邮箱已存在")
-    user = User(name=payload.name.strip(), email=str(payload.email) if payload.email else None, school_name=payload.school_name, class_name=payload.class_name, password_hash=password_hash.hash(payload.password), role=UserRole.STUDENT)
+    user = User(name=payload.name.strip(), email=str(payload.email) if payload.email else None, city_name=payload.city_name, district_name=payload.district_name, school_name=payload.school_name, class_name=payload.class_name, password_hash=password_hash.hash(payload.password), role=payload.role)
     db.add(user); db.commit(); db.refresh(user)
     token, expires_at = make_token(user, db)
     return TokenOut(access_token=token, expires_at=expires_at, user=user_out(user))
@@ -245,14 +256,14 @@ def update_me(payload: UserUpdate, user: CurrentUser, db: Annotated[Session, Dep
 def admin_create_user(payload: UserCreate, admin: AdminOnly, db: Annotated[Session, Depends(get_db)]) -> UserOut:
     if db.scalar(select(User).where(or_(User.name == payload.name, payload.email is not None and User.email == payload.email))):
         raise HTTPException(status_code=409, detail="名字或邮箱已存在")
-    user = User(name=payload.name.strip(), email=str(payload.email) if payload.email else None, school_name=payload.school_name, class_name=payload.class_name, password_hash=password_hash.hash(payload.password), role=payload.role)
+    user = User(name=payload.name.strip(), email=str(payload.email) if payload.email else None, city_name=payload.city_name, district_name=payload.district_name, school_name=payload.school_name, class_name=payload.class_name, password_hash=password_hash.hash(payload.password), role=payload.role)
     db.add(user); db.commit(); db.refresh(user)
     return user_out(user)
 
 
 @app.post("/api/classrooms", response_model=ClassroomOut, status_code=201)
 def create_class(payload: ClassroomCreate, teacher: TeacherOrAdmin, db: Annotated[Session, Depends(get_db)]) -> ClassroomOut:
-    classroom = Classroom(name=payload.name.strip(), school_name=payload.school_name.strip(), teacher_id=teacher.id, invite_code=generate_invite_code(db))
+    classroom = Classroom(name=payload.name.strip(), city_name=teacher.city_name, district_name=teacher.district_name, school_name=payload.school_name.strip(), teacher_id=teacher.id, invite_code=generate_invite_code(db))
     db.add(classroom); db.commit(); db.refresh(classroom)
     return ClassroomOut.model_validate(classroom).model_copy(update={"student_count": 0, "invite_code": classroom.invite_code})
 
@@ -275,8 +286,10 @@ def join_class(payload: JoinClassroomRequest, student: CurrentUser, db: Annotate
     classroom = db.scalar(select(Classroom).where(Classroom.invite_code == code))
     if not classroom:
         raise HTTPException(status_code=404, detail="邀请码无效，请检查后重试")
-    if student.school_name and classroom.school_name and student.school_name.strip() != classroom.school_name.strip():
-        raise HTTPException(status_code=403, detail="该邀请码属于其他学校，不能加入")
+    location = (student.city_name, student.district_name, student.school_name)
+    class_location = (classroom.city_name, classroom.district_name, classroom.school_name)
+    if any(value is None or not str(value).strip() for value in location) or any(value is None or not str(value).strip() for value in class_location) or tuple(str(value).strip() for value in location) != tuple(str(value).strip() for value in class_location):
+        raise HTTPException(status_code=403, detail="城市、区或学校不匹配，不能加入该班级")
     if not db.scalar(select(ClassMember).where(ClassMember.classroom_id == classroom.id, ClassMember.student_id == student.id)):
         db.add(ClassMember(classroom_id=classroom.id, student_id=student.id)); db.commit()
     db.refresh(classroom)

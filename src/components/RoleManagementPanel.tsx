@@ -32,8 +32,8 @@ export const RoleManagementPanel: React.FC<Props> = ({ isOpen, onClose, currentU
   if (!isOpen) return null;
 
   const createClass = async () => {
-    if (!className.trim()) return;
-    try { await createClassroomApi(className.trim(), currentUser.school || '未填写学校'); setClassName(''); setMessage('班级创建成功'); await load(); }
+    if (!className.trim() || !currentUser.city.trim() || !currentUser.district.trim() || !currentUser.school.trim()) { setMessage('请先完善城市、区和学校信息'); return; }
+    try { await createClassroomApi(className.trim(), currentUser.city, currentUser.district, currentUser.school); setClassName(''); setMessage('班级创建成功'); await load(); }
     catch (error) { setMessage(error instanceof Error ? error.message : '班级创建失败'); }
   };
   const selectClass = async (id: number) => { setSelectedClass(id); try { setStudents((await fetchClassStudents(id)).map(apiUserToProfile)); } catch (error) { setMessage(error instanceof Error ? error.message : '学生加载失败'); } };
